@@ -143,6 +143,61 @@ _L10N = {
     "cat_hardcoded":  {"en": "Hardcoded texts", "it": "Testi Hardcoded"},
     "cat_orphans":    {"en": "Orphan keys", "it": "Chiavi Orfane"},
     "cat_mixed":      {"en": "Mixed languages", "it": "Lingue Miste"},
+    "an_icu":         {"en": "🔢 ICU plural rules",
+                       "it": "🔢 Regole di plurale ICU"},
+    "icu_absent":     {"en": "   ℹ️ no ICU messages in this project",
+                       "it": "   ℹ️ nessun messaggio ICU in questo progetto"},
+    "icu_ok":         {"en": "   ✅ {n} ICU messages, every plural covers its "
+                             "language",
+                       "it": "   ✅ {n} messaggi ICU, ogni plurale copre la sua "
+                             "lingua"},
+    "icu_bad":        {"en": "   ⚠️ {n} problems over {scanned} ICU messages "
+                             "({high} blocking)",
+                       "it": "   ⚠️ {n} problemi su {scanned} messaggi ICU "
+                             "({high} bloccanti)"},
+    "icu_src_hint":   {"en": "   ℹ️ category sets came from the built-in table; "
+                             "install babel for authoritative CLDR rules",
+                       "it": "   ℹ️ categorie dalla tabella interna; installa "
+                             "babel per le regole CLDR autorevoli"},
+    "icu_src_builtin": {"en": "built-in table, not blocking",
+                        "it": "tabella interna, non bloccante"},
+    "icu_p_malformed": {"en": "malformed ICU message — it will raise at format "
+                              "time",
+                        "it": "messaggio ICU malformato — solleverà un errore "
+                              "in fase di formattazione"},
+    "icu_p_no_other": {"en": 'no "other" branch — ICU requires one in every '
+                             'language',
+                       "it": 'manca il ramo "other" — ICU lo richiede in ogni '
+                             'lingua'},
+    "icu_p_bad_keyword": {"en": '"{kw}" is not a plural category',
+                          "it": '"{kw}" non è una categoria di plurale'},
+    "icu_p_duplicate": {"en": 'branch "{kw}" appears more than once',
+                        "it": 'il ramo "{kw}" compare più di una volta'},
+    "icu_p_missing":  {"en": "missing {cats} — everyday counts in this language "
+                             "select it ({src})",
+                       "it": "manca {cats} — i conteggi di tutti i giorni in "
+                             "questa lingua lo selezionano ({src})"},
+    "icu_p_missing_rare": {"en": "missing {cats} — only large numbers, decimals "
+                                 "or compact notation reach it",
+                           "it": "manca {cats} — lo raggiungono solo numeri "
+                                 "grandi, decimali o notazione compatta"},
+    "icu_p_dead":     {"en": "{cats} is never selected in this language, so the "
+                             "branch is dead; to special-case a number use an "
+                             "explicit =N selector instead",
+                       "it": "{cats} non viene mai selezionato in questa lingua, "
+                             "quindi il ramo è morto; per un numero speciale usa "
+                             "un selettore esplicito =N"},
+    "icu_p_flattened": {"en": "plural in {master} but a plain string here",
+                        "it": "plurale in {master} ma qui è una stringa semplice"},
+    "fail_icu":       {"en": "ICU plurals broken: {n} ({items})",
+                       "it": "plurali ICU rotti: {n} ({items})"},
+    "cat_icu":        {"en": "ICU plural rules", "it": "Regole di plurale ICU"},
+    "r_icu_h":        {"en": "\n## 🔢 ICU plural rules\n\n",
+                       "it": "\n## 🔢 Regole di plurale ICU\n\n"},
+    "r_icu_line":     {"en": "- `{lang}` → `{key}` — {detail}\n",
+                       "it": "- `{lang}` → `{key}` — {detail}\n"},
+    "scan_backend":   {"en": "   ℹ️  non-Python sources read with {how} ({exts})",
+                       "it": "   ℹ️  sorgenti non-Python letti con {how} ({exts})"},
     "sev_crit":       {"en": "🔥 Critical", "it": "🔥 Critica"},
     "sev_high":       {"en": "⚠️ High", "it": "⚠️ Alta"},
     "sev_med":        {"en": "🚸 Medium", "it": "🚸 Media"},
@@ -412,6 +467,244 @@ def _extract_keys_regex(src: str) -> Tuple[Set[str], Set[str]]:
     for m in _RX_CODE_TEMPLATE.finditer(src):
         prefixes.add(m.group(1))
     return keys, prefixes
+
+
+# ── Tree-sitter backend for non-Python sources ──────────────────────────────
+# Python gets a real AST from the standard library. Everything else got a
+# regex, which cannot tell a call from a mention of one: t('x') written inside
+# a string literal counts as usage, and a commented-out call only stops
+# counting because comments are blanked first — a workaround that has to guess
+# which '//' opens a comment and which sits inside a URL.
+#
+# tree-sitter parses 300+ grammars the same way. It is used here to CORRECT
+# the regex rather than to replace it, and that is a deliberate choice made
+# after measuring: on Vue and PHP the grammars returned no calls at all (Vue
+# keeps the <script> body as raw text without a language injection), so a
+# straight swap would have lost real keys and reported live ones as orphans.
+# Losing a key is the worse failure — it turns into a false orphan and hides
+# a real unresolved-key finding — so the rule is:
+#
+#   keys = (regex hits the tree cannot disprove) + (calls the tree found)
+#
+# A regex hit is dropped only when the parse tree can point at the string
+# literal or comment containing it. Anything tree-sitter cannot parse, or has
+# no grammar for, keeps the regex result untouched.
+
+_TS_LANG_BY_EXT = {
+    '.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript',
+    '.jsx': 'javascript',
+    '.ts': 'typescript', '.tsx': 'tsx',
+    '.vue': 'vue', '.svelte': 'svelte',
+    '.php': 'php', '.dart': 'dart',
+    '.kt': 'kotlin', '.kts': 'kotlin',
+    '.java': 'java', '.cs': 'csharp',
+    '.rb': 'ruby', '.go': 'go', '.rs': 'rust',
+    '.qml': 'qmljs',
+}
+
+# Node types that mean "a function is being called". The grammars disagree on
+# the name; they agree on the shape, which is what the walk relies on.
+_TS_CALL_TYPES = frozenset((
+    'call', 'call_expression', 'function_call_expression', 'function_call',
+    'method_invocation', 'invocation_expression', 'method_call',
+    'call_statement', 'scoped_call_expression', 'member_call_expression',
+))
+
+# Names accepted as translation calls, on top of TRANSLATION_FUNCTIONS, to
+# match what the regex already recognises.
+_TS_EXTRA_CALL_NAMES = frozenset(('tc', '__'))
+
+# Set true to ignore tree-sitter and exercise the regex path. The self-test
+# flips it so BOTH backends are covered on the same fixture.
+_FORCE_REGEX_EXTRACTION = False
+
+# lang → parser, or None when unavailable, so a project with a thousand .kt
+# files asks the pack once instead of a thousand times.
+_ts_parser_cache: Dict[str, object] = {}
+
+# ext → which backend actually read it, filled in as files are scanned.
+_EXTRACTION_BACKENDS: Dict[str, str] = {}
+
+
+def _ts_parser(lang: str):
+    """A parser for *lang*, or None when tree-sitter cannot supply one."""
+    if lang in _ts_parser_cache:
+        return _ts_parser_cache[lang]
+    parser = None
+    try:
+        from tree_sitter_language_pack import get_parser
+        parser = get_parser(lang)
+    except Exception:
+        parser = None
+    _ts_parser_cache[lang] = parser
+    return parser
+
+
+def _ts_callee_name(node) -> str:
+    """The bare function name of a call node.
+
+    Takes the last identifier before the arguments, so ``i18n.t``,
+    ``self.tr``, ``$t``, ``Foo::translate`` and ``obj->__`` all come back as
+    the name TRANSLATION_FUNCTIONS is written in terms of.
+    """
+    target = (node.child_by_field_name('function')
+              or node.child_by_field_name('method'))
+    if target is None:
+        for child in node.children:
+            if child.type not in ('arguments', 'argument_list'):
+                target = child
+                break
+    if target is None:
+        return ""
+    text = target.text.decode('utf-8', 'replace')
+    for sep in ('::', '->', '.'):
+        if sep in text:
+            text = text.rsplit(sep, 1)[-1]
+    return text.strip().lstrip('$@')
+
+
+def _ts_string_value(node):
+    """(text, is_interpolated) for a string-ish node, else (None, False).
+
+    Interpolation is reported, not resolved: ``t(`menu.${name}`)`` cannot
+    become a key, but everything before the hole is exactly the dynamic
+    prefix the orphan check wants.
+    """
+    if 'string' not in node.type:
+        return None, False
+    raw = node.text.decode('utf-8', 'replace')
+    interpolated = any('interpolation' in c.type or 'substitution' in c.type
+                       for c in node.children)
+    for quote in ('"""', "'''", '`', '"', "'"):
+        if (raw.startswith(quote) and raw.endswith(quote)
+                and len(raw) >= 2 * len(quote)):
+            raw = raw[len(quote):-len(quote)]
+            break
+    if interpolated:
+        raw = re.split(r'\$\{|#\{|\{\{|\$\(', raw, maxsplit=1)[0]
+    return raw, interpolated
+
+
+def _ts_first_string_arg(node):
+    """(literal_text, is_interpolated) of a call's first argument.
+
+    (None, False) when the first argument is not a string — a variable, a
+    number, another call. Those are dynamic by definition.
+    """
+    args = (node.child_by_field_name('arguments')
+            or node.child_by_field_name('argument_list'))
+    if args is None:
+        for child in node.children:
+            if 'argument' in child.type:
+                args = child
+                break
+    if args is None:
+        return None, False
+    for child in args.children:
+        if child.type in (',', '(', ')'):
+            continue
+        return _ts_string_value(child)
+    return None, False
+
+
+def _ts_scan(src_bytes: bytes, root):
+    """One walk: (quoted_or_commented spans, holes, keys, prefixes).
+
+    *spans* are byte ranges where a regex hit means nothing — inside a
+    string literal or a comment. *holes* are the interpolation slots inside
+    those strings, where code genuinely resumes: a call written in
+    ``${t('x')}`` sits inside a template literal and must survive.
+    """
+    spans, holes = [], []
+    keys: Set[str] = set()
+    prefixes: Set[str] = set()
+    stack = [root]
+    seen = 0
+    while stack:
+        node = stack.pop()
+        seen += 1
+        if seen > 400_000:            # pathological input, not a parse
+            break
+        ntype = node.type
+        if 'comment' in ntype or 'string' in ntype:
+            spans.append((node.start_byte, node.end_byte))
+        if 'interpolation' in ntype or 'substitution' in ntype:
+            holes.append((node.start_byte, node.end_byte))
+        if ntype in _TS_CALL_TYPES:
+            name = _ts_callee_name(node)
+            if name in TRANSLATION_FUNCTIONS or name in _TS_EXTRA_CALL_NAMES:
+                text, interpolated = _ts_first_string_arg(node)
+                if text:
+                    if interpolated:
+                        if text.endswith('.'):
+                            prefixes.add(text)
+                    elif PythonCodeAnalyzer._KEY_PATTERN.match(text):
+                        keys.add(text)
+        stack.extend(node.children)
+    return spans, holes, keys, prefixes
+
+
+def _extract_keys_ast(src: str, ext: str):
+    """(keys, prefixes) with the regex corrected by a parse tree, or None.
+
+    None means "this backend could not answer" — no tree-sitter, no grammar
+    for the extension, or a parse that failed. It never means "nothing
+    found", which is a legitimate answer returned as empty sets.
+    """
+    if _FORCE_REGEX_EXTRACTION:
+        return None
+    lang = _TS_LANG_BY_EXT.get(ext)
+    if not lang:
+        return None
+    parser = _ts_parser(lang)
+    if parser is None:
+        return None
+    try:
+        data = src.encode('utf-8', 'replace')
+        tree = parser.parse(data)
+        if tree is None or tree.root_node is None:
+            return None
+        spans, holes, keys, prefixes = _ts_scan(data, tree.root_node)
+    except Exception:
+        logger.debug("tree-sitter could not read a %s file", ext,
+                     exc_info=True)
+        return None
+
+    def quoted(offset: int) -> bool:
+        """True when a match at *offset* is inside a string or comment and
+        not inside an interpolation slot within one."""
+        if any(a <= offset < b for a, b in holes):
+            return False
+        return any(a <= offset < b for a, b in spans)
+
+    # The regex runs on the RAW source here: blanking comments is the trick
+    # the regex path needs precisely because it has no tree, and the tree
+    # marks them properly.
+    for match in _RX_CODE_CALL.finditer(src):
+        value = match.group(2)
+        if quoted(match.start()):
+            continue
+        if PythonCodeAnalyzer._KEY_PATTERN.match(value):
+            keys.add(value)
+    for match in _RX_CODE_TEMPLATE.finditer(src):
+        if not quoted(match.start()):
+            prefixes.add(match.group(1))
+    return keys, prefixes
+
+
+def _extract_keys(src: str, ext: str) -> Tuple[Set[str], Set[str]]:
+    """Keys and dynamic prefixes from a non-Python source.
+
+    Tree-corrected when a grammar is available, plain regex when not. Which
+    one ran is recorded so the run can say so, rather than leaving the user
+    to guess how much to trust the result.
+    """
+    result = _extract_keys_ast(src, ext)
+    if result is not None:
+        _EXTRACTION_BACKENDS[ext] = "tree-sitter"
+        return result
+    _EXTRACTION_BACKENDS[ext] = "regex"
+    return _extract_keys_regex(src)
 
 
 # ── Heuristic hardcoded-text hints for non-Python sources ───────────────────
@@ -1281,6 +1574,270 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
 # ==========================================
 # 🧠 ANALIZZATORE PRINCIPALE
 # ==========================================
+# ═══════════════════════════════════════════════════════════════════════════
+# ICU MessageFormat — plural rule coverage
+# ═══════════════════════════════════════════════════════════════════════════
+# A plural whose language needs six forms and got two reads perfectly in
+# review: the English is right, the translation is right, nothing is empty
+# and no placeholder is missing. It is wrong only for the counts that land
+# on the branch nobody wrote — which in Russian is most of them, and in
+# Arabic nearly all of them. That is invisible to every other check in this
+# file, so it gets its own.
+
+_ICU_CATEGORIES = frozenset(("zero", "one", "two", "few", "many", "other"))
+_ICU_SUBMESSAGE_KINDS = frozenset(("plural", "selectordinal", "select"))
+
+# Cheap gate: only messages that look like ICU pay for the parser. A project
+# with no ICU at all (SaveSync is one) spends one regex per string.
+_RX_ICU_HINT = re.compile(
+    r"\{\s*[\w.]+\s*,\s*(?:plural|select|selectordinal)\s*,")
+
+# Counts a user actually sees. Probing the real rules with these tells us
+# which categories are everyday and which exist only for millions, decimals
+# or compact notation — see _plural_categories.
+_PLURAL_PROBE_INTS = tuple(range(0, 201))
+
+# Set true to ignore babel and exercise the built-in table. The self-test
+# flips it so BOTH sources are covered, whatever the machine has installed.
+_FORCE_BUILTIN_PLURALS = False
+
+
+def _icu_skip_quote(s: str, i: int) -> int:
+    """Index just past the ICU quote starting at *i* (which is an apostrophe).
+
+    ICU rules: '' is one literal apostrophe; an apostrophe before { } # or |
+    opens a quoted run that ends at the next apostrophe; anywhere else it is
+    an ordinary character. Getting this wrong would mis-read every Italian
+    l'utente and French d'accord in the file.
+    """
+    n = len(s)
+    if i + 1 < n and s[i + 1] == "'":
+        return i + 2
+    if i + 1 < n and s[i + 1] in "{}#|":
+        end = s.find("'", i + 2)
+        return n if end == -1 else end + 1
+    return i + 1
+
+
+def _icu_find_close(s: str, start: int) -> int:
+    """Index of the '}' matching the '{' at *start*, or -1 if it never closes."""
+    depth = 0
+    i = start
+    n = len(s)
+    while i < n:
+        ch = s[i]
+        if ch == "'":
+            i = _icu_skip_quote(s, i)
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return -1
+
+
+def _icu_branches(body: str):
+    """Parse "one{...} other{...}" into ({keyword: body}, order, errors).
+
+    *order* keeps repeats, so a duplicated keyword is visible as
+    len(order) != len(branches). "offset:N" is consumed. Explicit "=0"
+    selectors stay in the mapping; they are values, not plural categories,
+    and the caller filters them out.
+    """
+    branches, order, errors = {}, [], []
+    i, n = 0, len(body)
+    while i < n:
+        while i < n and body[i].isspace():
+            i += 1
+        if i >= n:
+            break
+        j = i
+        while j < n and not body[j].isspace() and body[j] != "{":
+            j += 1
+        keyword = body[i:j]
+        while j < n and body[j].isspace():
+            j += 1
+        if not keyword:
+            break
+        if keyword.lower().startswith("offset:"):
+            i = j
+            continue
+        if j >= n or body[j] != "{":
+            errors.append(keyword)
+            break
+        close = _icu_find_close(body, j)
+        if close == -1:
+            errors.append(keyword)
+            break
+        order.append(keyword)
+        branches[keyword] = body[j + 1:close]
+        i = close + 1
+    return branches, order, errors
+
+
+def _icu_arguments(text: str):
+    """Every argument in *text*: (submessages, simple_names, errors).
+
+    A submessage is a plural/select/selectordinal dict with its branches;
+    a simple name is the argument of a plain {name} or {n, number}. Nested
+    arguments inside branch bodies are found too. *errors* holds structural
+    problems that make the message unformattable at runtime.
+    """
+    subs, simples, errors = [], set(), []
+
+    def walk(s: str, depth: int = 0):
+        if depth > 8:
+            return
+        i, n = 0, len(s)
+        while i < n:
+            ch = s[i]
+            if ch == "'":
+                i = _icu_skip_quote(s, i)
+                continue
+            if ch != "{":
+                i += 1
+                continue
+            close = _icu_find_close(s, i)
+            if close == -1:
+                errors.append(s[i:i + 60])
+                return
+            inner = s[i + 1:close]
+            i = close + 1
+            head, _, rest = inner.partition(",")
+            kind, _, body = rest.partition(",")
+            name, kind = head.strip(), kind.strip()
+            if kind in _ICU_SUBMESSAGE_KINDS and name:
+                branches, order, berrs = _icu_branches(body)
+                errors.extend(berrs)
+                subs.append({"name": name, "kind": kind,
+                             "branches": branches, "order": order})
+                for sub_body in branches.values():
+                    walk(sub_body, depth + 1)
+            elif "{" not in inner and name and re.fullmatch(r"[\w.]+", name):
+                simples.add(name)
+            else:
+                walk(inner, depth + 1)
+
+    walk(text)
+    return subs, simples, errors
+
+
+def _icu_placeholders(text: str):
+    """Placeholder set for an ICU message, or None when it will not parse.
+
+    The point is that this must come out IDENTICAL across languages. The
+    plain-brace regex cannot: on {count, plural, one{# item} other{# items}}
+    it never sees "count" and instead reports "# item" and "# items" — the
+    translated prose — as if those were variable names. Compared against a
+    Russian translation that is a guaranteed mismatch, reported as critical,
+    on every plural in the project.
+    """
+    try:
+        subs, simples, errors = _icu_arguments(text)
+    except Exception:
+        return None
+    if errors:
+        return None
+    names = {a["name"] for a in subs} | simples
+    if not names:
+        return None
+    return names | set(re.findall(r"(%[sdif])", text))
+
+
+def _base_lang(code: str) -> str:
+    """'pt_BR' / 'zh-Hans' -> 'pt' / 'zh'."""
+    return re.split(r"[-_]", str(code).strip(), maxsplit=1)[0].lower()
+
+
+# Fallback when babel is absent. Two sets per language: categories a plain
+# count 0-200 selects, and the extra ones only large numbers, decimals or
+# compact notation reach. Findings drawn from here are capped at medium and
+# say so — a wrong row costs a noisy line, never a broken build.
+_ONLY_OTHER = ("ja", "ko", "zh", "th", "vi", "id", "ms", "my", "km", "lo",
+               "yue", "jv", "su", "bo", "dz", "ig", "yo", "to", "wo")
+_ONE_OTHER = ("en", "de", "nl", "sv", "da", "nb", "nn", "no", "fi", "et",
+              "el", "bg", "af", "sw", "ur", "tr", "az", "hu", "ka", "kk",
+              "ky", "uz", "mn", "ne", "sq", "ta", "te", "kn", "ml", "mr",
+              "hi", "bn", "gu", "pa", "as", "or", "si", "am", "fa", "eu",
+              "is", "mk", "fil", "tl", "hy", "so", "zu", "nso")
+_BUILTIN_PLURAL_SETS: Dict[str, tuple] = {}
+for _c in _ONLY_OTHER:
+    _BUILTIN_PLURAL_SETS[_c] = ({"other"}, set())
+for _c in _ONE_OTHER:
+    _BUILTIN_PLURAL_SETS[_c] = ({"one", "other"}, set())
+_BUILTIN_PLURAL_SETS.update({
+    # Romance: "many" is the compact/million form ("1 milione"), not everyday.
+    "it": ({"one", "other"}, {"many"}),
+    "es": ({"one", "other"}, {"many"}),
+    "fr": ({"one", "other"}, {"many"}),
+    "pt": ({"one", "other"}, {"many"}),
+    "ca": ({"one", "other"}, {"many"}),
+    # Slavic: few/many fire at 2 and 5. Missing one is an everyday bug.
+    "ru": ({"one", "few", "many"}, {"other"}),
+    "uk": ({"one", "few", "many"}, {"other"}),
+    "be": ({"one", "few", "many"}, {"other"}),
+    "pl": ({"one", "few", "many"}, {"other"}),
+    "cs": ({"one", "few", "other"}, {"many"}),
+    "sk": ({"one", "few", "other"}, {"many"}),
+    "hr": ({"one", "few", "other"}, set()),
+    "sr": ({"one", "few", "other"}, set()),
+    "bs": ({"one", "few", "other"}, set()),
+    "sl": ({"one", "two", "few", "other"}, set()),
+    "lt": ({"one", "few", "other"}, {"many"}),
+    "lv": ({"zero", "one", "other"}, set()),
+    "ro": ({"one", "few", "other"}, set()),
+    "ar": ({"zero", "one", "two", "few", "many", "other"}, set()),
+    "he": ({"one", "two", "other"}, set()),
+    "ga": ({"one", "two", "few", "many", "other"}, set()),
+    "gd": ({"one", "two", "few", "other"}, set()),
+    "cy": ({"zero", "one", "two", "few", "many", "other"}, set()),
+    "br": ({"one", "two", "few", "many", "other"}, set()),
+    "mt": ({"one", "two", "few", "many", "other"}, set()),
+})
+
+
+def _plural_categories(lang: str, ordinal: bool = False):
+    """(everyday, rare, source, rule) for *lang*, or None when the language is new.
+
+    everyday — categories a plain integer count 0-200 selects. A missing one
+               shows the wrong text for numbers users type every day.
+    rare     — categories only large numbers, decimals or compact notation
+               reach. Nearly every real project omits these and is fine.
+
+    The split is DERIVED by running the language's own rules over real
+    counts, not hardcoded per language, so it stays correct for languages
+    this file has never heard of. Unknown language -> None, and the caller
+    falls back to the checks that need no table at all.
+
+    *rule* maps a count to its category, or is None when the sets came
+    from the built-in table. Callers need it to decide whether an
+    explicit =1 selector already covers a category.
+    """
+    base = _base_lang(lang)
+    if not _FORCE_BUILTIN_PLURALS:
+        try:
+            from babel import Locale
+            loc = Locale.parse(base)
+            rule = loc.ordinal_form if ordinal else loc.plural_form
+            every = {rule(n) for n in _PLURAL_PROBE_INTS}
+            # "other" is the implicit fallback: babel leaves it out of .tags,
+            # so English would come back needing only "one" without this.
+            allcats = set(rule.tags) | {"other"}
+            every &= allcats
+            return every, allcats - every, "CLDR", rule
+        except Exception:
+            pass
+    if ordinal:
+        return None          # ordinal sets differ from cardinal; no guessing
+    sets = _BUILTIN_PLURAL_SETS.get(base)
+    if not sets:
+        return None
+    return set(sets[0]), set(sets[1]), "built-in", None
+
+
 class UniversalQualityAnalyzer:
     def __init__(self, report_path: Optional[Path] = None):
         self.flat_locales: Dict[str, Dict[str, str]] = {}   # lang → {flat_key: value}
@@ -1295,7 +1852,7 @@ class UniversalQualityAnalyzer:
         self.results = {
             'hardcoded': [], 'json_duplicates': [], 'mixed_langs': [],
             'missing_keys': [], 'empty_values': [], 'mismatched_vars': [],
-            'orphan_keys': set(), 'unresolved_code_keys': [],
+            'orphan_keys': set(), 'unresolved_code_keys': [], 'icu_plurals': [],
         }
         self.all_known_keys: Set[str] = set()
         self.all_used_code_keys: Set[str] = set()
@@ -1326,6 +1883,7 @@ class UniversalQualityAnalyzer:
         self.test_mixed_languages()
         self.test_orphan_keys()
         self.test_json_real_duplicates()
+        self.test_icu_plural_rules()
         self.test_severity_budgets()
 
         self.generate_report()
@@ -1444,8 +2002,22 @@ class UniversalQualityAnalyzer:
 
     @staticmethod
     def _extract_placeholders(text: str) -> Set[str]:
-        braces = set(re.findall(r'\{([^{}]+)\}', str(text)))
-        percents = set(re.findall(r'(%[sdif])', str(text)))
+        """Variables a message expects, for the cross-language comparison.
+
+        ICU messages take a different path because the plain regex below
+        matches only innermost braces: on a plural it returns the branch
+        PROSE ("# item", "# items") and never the argument. Two languages
+        then never agree and every plural is reported as a critical
+        placeholder mismatch. Anything that does not look like ICU, or that
+        fails to parse, keeps the original behaviour untouched.
+        """
+        s = str(text)
+        if _RX_ICU_HINT.search(s):
+            icu = _icu_placeholders(s)
+            if icu is not None:
+                return icu
+        braces = set(re.findall(r'\{([^{}]+)\}', s))
+        percents = set(re.findall(r'(%[sdif])', s))
         return braces | percents
 
     # ALL-CAPS tokens that are technical arguments, never UI headings
@@ -1651,15 +2223,17 @@ class UniversalQualityAnalyzer:
     def test_python_code(self):
         print("\n" + L("an_python"))
         n_py = n_other = 0
+        _EXTRACTION_BACKENDS.clear()
         for root, dirs, files in os.walk(PROJECT_ROOT):
             dirs[:] = [d for d in dirs if d not in PYTHON_EXCLUDES and not d.startswith('.')]
             for fname in files:
                 ext = Path(fname).suffix.lower()
                 fpath = Path(root) / fname
                 if ext in _REGEX_CODE_EXTENSIONS:
-                    # Non-Python source: regex key extraction only —
-                    # minified bundles are skipped (regex soup, no keys
-                    # a human wrote).
+                    # Non-Python source: key extraction via tree-sitter
+                    # when a grammar is available, regex otherwise —
+                    # minified bundles are skipped either way (no keys a
+                    # human wrote, and megabytes of them).
                     try:
                         _src = fpath.read_text(encoding='utf-8', errors='replace')
                     except Exception:
@@ -1667,7 +2241,7 @@ class UniversalQualityAnalyzer:
                     if '.min.' in fname.lower() or _looks_generated(_src):
                         continue
                     try:
-                        _keys, _prefixes = _extract_keys_regex(_src)
+                        _keys, _prefixes = _extract_keys(_src, ext)
                         self.all_used_code_keys.update(_keys)
                         self.all_t_call_keys.update(_keys)
                         self.all_dynamic_prefixes.update(_prefixes)
@@ -1749,12 +2323,173 @@ class UniversalQualityAnalyzer:
                 except Exception:
                     pass
         print(L("scan_summary", py=n_py, other=n_other))
+        if _EXTRACTION_BACKENDS:
+            used = sorted(set(_EXTRACTION_BACKENDS.values()))
+            exts = ", ".join(sorted(_EXTRACTION_BACKENDS))
+            print(L("scan_backend", how=" + ".join(used), exts=exts))
 
     def severity_counts(self) -> Dict[str, int]:
         counts = {level: 0 for level in SEVERITY_ORDER}
         for it in self.results['hardcoded']:
             counts[it.get('severity') or _severity_for(it.get('context', ''))] += 1
         return counts
+
+    def test_icu_plural_rules(self):
+        """ICU MessageFormat: does every plural cover its language's forms?
+
+        Every other check in this file would pass a Russian plural written
+        with the two branches English needs. The key exists, nothing is
+        empty, the placeholder is there, the prose is Russian. It is simply
+        wrong for 2, 3, 4 (few) and for 5 and up (many) — which is to say,
+        for most numbers a user ever sees.
+
+        Findings are graded by how they were reached, not by how confident
+        this file feels:
+
+        - Structural problems need no table at all and always block: a
+          missing "other" branch (ICU raises without one), a keyword that is
+          not a plural category, the same branch twice, braces that never
+          close.
+        - "This language needs a category you did not write" leans on plural
+          rules. With babel installed those are real CLDR and the finding
+          blocks; from the built-in table it is capped at medium and says
+          so, so a wrong row here can never break somebody's build.
+
+        Categories only reachable through millions, decimals or compact
+        notation are reported separately at low severity, because nearly
+        every correct project omits them — requiring Italian "many" would
+        flag every well-written Italian plural in existence.
+        """
+        print("\n" + L("an_icu"))
+        if not self.flat_locales:
+            return
+        master_lang = max(self.flat_locales, key=lambda k: len(self.flat_locales[k]))
+        master = self.flat_locales.get(master_lang, {})
+        scanned = 0
+        sources = set()
+
+        def add(lang, key, severity, problem, detail, snippet):
+            # *problem* is a stable code. The self-test asserts on it, and it
+            # must not move when the tool runs in another language.
+            self.results['icu_plurals'].append({
+                'lang': lang, 'key': key, 'severity': severity,
+                'problem': problem, 'detail': detail,
+                'snippet': str(snippet)[:120]})
+
+        for lang, flat in sorted(self.flat_locales.items()):
+            cats = None
+            for key, text in flat.items():
+                text = str(text)
+                if not _RX_ICU_HINT.search(text):
+                    # Master has a plural here and this language flattened it
+                    # into a plain string. Only this direction is a finding:
+                    # the reverse is legitimate, since a richer language may
+                    # need branches English never had.
+                    if (lang != master_lang and key in master
+                            and _RX_ICU_HINT.search(str(master[key]))):
+                        add(lang, key, 'medium', 'flattened',
+                            L("icu_p_flattened", master=master_lang), text)
+                    continue
+                scanned += 1
+                try:
+                    subs, _simples, errors = _icu_arguments(text)
+                except Exception:
+                    subs, errors = [], ["?"]
+                if errors:
+                    add(lang, key, 'high', 'malformed',
+                        L("icu_p_malformed"), text)
+                    continue
+                if cats is None:
+                    cats = _plural_categories(lang) or ()
+                for arg in subs:
+                    kind = arg['kind']
+                    present = set(arg['branches'])
+                    if len(arg['order']) != len(present):
+                        dupes = sorted({k for k in arg['order']
+                                        if arg['order'].count(k) > 1})
+                        add(lang, key, 'high', 'duplicate',
+                            L("icu_p_duplicate", kw=", ".join(dupes)), text)
+                    if 'other' not in present:
+                        add(lang, key, 'high', 'no_other',
+                            L("icu_p_no_other"), text)
+                    if kind == 'select':
+                        # Branch names here are arbitrary (male/female/other);
+                        # validating them against CLDR categories would flag
+                        # every correct gender select in the project.
+                        continue
+                    named = {k for k in present if not k.startswith('=')}
+                    bad = sorted(named - _ICU_CATEGORIES)
+                    if bad:
+                        add(lang, key, 'high', 'bad_keyword',
+                            L("icu_p_bad_keyword", kw=", ".join(bad)), text)
+                    if kind != 'plural' or not cats:
+                        # selectordinal selects from a different category set
+                        # that is not worth reconstructing from memory; it
+                        # keeps every structural check above.
+                        continue
+                    everyday, rare, src, rule = cats
+                    sources.add(src)
+                    # "=1{One file} other{# files}" is COMPLETE in a
+                    # two-form language: the explicit selector takes the
+                    # count "one" would have handled. Reporting a missing
+                    # "one" there would block a correct message — and the
+                    # advice this very check prints elsewhere is to reach
+                    # for exactly that syntax.
+                    explicit = {int(k[1:]) for k in present
+                                if k.startswith('=') and k[1:].isdigit()}
+
+                    def covered(cat, _e=explicit, _r=rule, _ev=everyday):
+                        if not _e:
+                            return False
+                        if _r is not None:
+                            hits = {n for n in _PLURAL_PROBE_INTS
+                                    if _r(n) == cat}
+                            return bool(hits) and hits <= _e
+                        # No rule function to ask. One inference is still
+                        # safe: where a language has two everyday forms,
+                        # "one" IS the singular and fires at 1 alone, so an
+                        # explicit =1 covers it. Languages whose "one" also
+                        # picks 21 and 31 (Russian, Polish) have more than
+                        # two everyday forms and never reach this branch.
+                        return (cat == "one" and 1 in _e
+                                and _ev == {"one", "other"})
+
+                    missing = sorted(c for c in everyday - named
+                                     if not covered(c))
+                    if missing:
+                        blocking = src == "CLDR"
+                        add(lang, key, 'high' if blocking else 'medium',
+                            'missing',
+                            L("icu_p_missing", cats=", ".join(missing),
+                              src=src if blocking else L("icu_src_builtin")),
+                            text)
+                    missing_rare = sorted(rare - named)
+                    if missing_rare:
+                        add(lang, key, 'low', 'missing_rare',
+                            L("icu_p_missing_rare",
+                              cats=", ".join(missing_rare)), text)
+                    dead = sorted(named - everyday - rare)
+                    if dead:
+                        add(lang, key, 'low', 'dead_branch',
+                            L("icu_p_dead", cats=", ".join(dead)), text)
+
+        found = self.results['icu_plurals']
+        if not scanned:
+            print(L("icu_absent"))
+            return
+        high = [f for f in found if f['severity'] == 'high']
+        if not found:
+            print(L("icu_ok", n=scanned))
+        else:
+            print(L("icu_bad", n=len(found), scanned=scanned, high=len(high)))
+            for f in found[:12]:
+                print(f"      - {f['lang']}:{f['key']} — {f['detail']}")
+        if "built-in" in sources:
+            print(L("icu_src_hint"))
+        if high:
+            self.failures.append(L(
+                "fail_icu", n=len(high),
+                items=", ".join(f"{f['lang']}:{f['key']}" for f in high[:6])))
 
     def test_severity_budgets(self):
         """Compare the findings against the ceilings the project set.
@@ -2042,6 +2777,15 @@ class UniversalQualityAnalyzer:
                 (L("cat_dups"), self.results['json_duplicates'], L("sev_crit")),
                 (L("cat_vars"), self.results['mismatched_vars'], L("sev_crit")),
                 (L("cat_unresolved"), self.results['unresolved_code_keys'], L("sev_crit")),
+                (L("cat_icu") + " — high",
+                 [i for i in self.results['icu_plurals'] if i['severity'] == 'high'],
+                 L("sev_crit")),
+                (L("cat_icu") + " — medium",
+                 [i for i in self.results['icu_plurals'] if i['severity'] == 'medium'],
+                 L("sev_med")),
+                (L("cat_icu") + " — low",
+                 [i for i in self.results['icu_plurals'] if i['severity'] == 'low'],
+                 L("sev_low")),
                 (L("cat_empty"), self.results['empty_values'], L("sev_high")),
                 (L("cat_missing"), self.results['missing_keys'], L("sev_high")),
                 (L("cat_hardcoded") + " — high",
@@ -2122,6 +2866,20 @@ class UniversalQualityAnalyzer:
                 for it in self.results['mismatched_vars']:
                     f.write(L("r_vars_line", key=it['key'], lang=it['lang'],
                               master=it['master_vars'], found=it['lang_vars']))
+                f.write("\n")
+
+            if self.results['icu_plurals']:
+                f.write(L("r_icu_h"))
+                rank = {'high': 0, 'medium': 1, 'low': 2}
+                for it in sorted(self.results['icu_plurals'],
+                                 key=lambda x: (rank.get(x['severity'], 3),
+                                                x['lang'], x['key'])):
+                    f.write(L("r_icu_line", lang=it['lang'], key=it['key'],
+                              detail=it['detail']))
+                    # The snippet is ICU source, so it is full of braces. It
+                    # goes through an f-string, never through L(): a template
+                    # would try to format those braces as fields and raise.
+                    f.write(f"    - `{it['snippet']}`\n")
                 f.write("\n")
 
             if self.results['empty_values']:
@@ -2378,6 +3136,233 @@ _SELF_TEST_CASES_JS = [
 ]
 
 
+# ── Scenario 3: ICU MessageFormat ──────────────────────────────────────────
+# SaveSync itself has no ICU at all, so without this fixture the whole plural
+# engine would ship unexercised. Every planted problem below is one a human
+# reviewer waves through: the prose is right in each language, and only the
+# branch coverage is wrong.
+_SELF_TEST_FILES_ICU = {
+    "locales/en.json": """{
+  "cart": {
+    "items_ok":  "{count, plural, one{# item} other{# items}}",
+    "files":     "{count, plural, one{# file} other{# files}}",
+    "photos":    "{count, plural, one{# photo} other{# photos}}",
+    "flat":      "{count, plural, one{# note} other{# notes}}",
+    "no_other":  "{count, plural, one{# item} few{# items}}",
+    "broken":    "{count, plural, one{# item other{# items}}",
+    "typo":      "{count, plural, one{# item} ohter{# items}}",
+    "dupe":      "{count, plural, one{# item} one{# thing} other{# items}}",
+    "zero_dead": "{count, plural, zero{no items} one{# item} other{# items}}",
+    "who":       "{gender, select, male{He wrote} female{She wrote} other{They wrote}}",
+    "nested":    "{count, plural, one{# item for {name}} other{# items for {name}}}",
+    "one_file":  "{n, plural, =1{One file} other{# files}}"
+  }
+}""",
+    "locales/ru.json": """{
+  "cart": {
+    "items_ok": "{count, plural, one{# товар} few{# товара} many{# товаров} other{# товара}}",
+    "files":    "{count, plural, one{# файл} other{# файла}}",
+    "flat":     "заметки",
+    "nested":   "{count, plural, one{# товар для {name}} few{# товара для {name}} many{# товаров для {name}} other{# товара для {name}}}",
+    "one_file": "{n, plural, =1{Один файл} other{# файлов}}"
+  }
+}""",
+    "locales/ar.json": """{
+  "cart": {
+    "photos": "{count, plural, one{صورة} other{# صورة}}"
+  }
+}""",
+    "locales/it.json": """{
+  "cart": {
+    "items_ok": "{count, plural, one{# articolo} other{# articoli}}",
+    "apos":     "{count, plural, one{l'utente ha # file} other{gli utenti hanno # file}}",
+    "quoted":   "{count, plural, one{una '{'graffa'}' letterale} other{# graffe}}"
+  }
+}""",
+    "app.py": '''
+from i18n import t
+
+def build(ui):
+    ui.setText(t("cart.items_ok"))
+    ui.setText(t("cart.files"))
+    ui.setText(t("cart.photos"))
+    ui.setText(t("cart.flat"))
+    ui.setText(t("cart.no_other"))
+    ui.setText(t("cart.broken"))
+    ui.setText(t("cart.typo"))
+    ui.setText(t("cart.dupe"))
+    ui.setText(t("cart.zero_dead"))
+    ui.setText(t("cart.who"))
+    ui.setText(t("cart.nested"))
+    ui.setText(t("cart.apos"))
+    ui.setText(t("cart.quoted"))
+    ui.setText(t("cart.one_file"))
+''',
+}
+
+
+def _icu_find(analyzer, lang, key, problem=None):
+    """Findings for one locale key, optionally narrowed to one problem code."""
+    return [f for f in analyzer.results['icu_plurals']
+            if f['lang'] == lang and f['key'] == key
+            and (problem is None or f['problem'] == problem)]
+
+
+_SELF_TEST_CASES_ICU = [
+    # ── the point of the whole check ────────────────────────────────────────
+    ("icu_ru_missing_forms",
+     "a Russian plural written with English's two branches is caught",
+     lambda a: bool(_icu_find(a, 'ru', 'cart.files', 'missing'))),
+    ("icu_ru_names_the_forms",
+     "and it names few and many, the ones actually absent",
+     lambda a: all(c in _icu_find(a, 'ru', 'cart.files', 'missing')[0]['detail']
+                   for c in ('few', 'many'))),
+    ("icu_ar_missing_forms",
+     "Arabic missing zero/two/few/many is caught",
+     lambda a: bool(_icu_find(a, 'ar', 'cart.photos', 'missing'))),
+    ("icu_severity_follows_source",
+     "missing-form severity is high from CLDR, medium from the built-in table",
+     lambda a: _icu_find(a, 'ru', 'cart.files', 'missing')[0]['severity']
+     == ('high' if (_plural_categories('ru') or (0, 0, ''))[2] == 'CLDR'
+         else 'medium')),
+
+    # ── structural, table-free, always blocking ─────────────────────────────
+    ("icu_no_other",
+     "a plural with no other branch is blocking",
+     lambda a: bool(_icu_find(a, 'en', 'cart.no_other', 'no_other'))),
+    ("icu_malformed",
+     "braces that never close are blocking",
+     lambda a: bool(_icu_find(a, 'en', 'cart.broken', 'malformed'))),
+    ("icu_bad_keyword",
+     "a misspelt category (ohter) is blocking",
+     lambda a: bool(_icu_find(a, 'en', 'cart.typo', 'bad_keyword'))),
+    ("icu_duplicate_branch",
+     "the same branch twice is blocking",
+     lambda a: bool(_icu_find(a, 'en', 'cart.dupe', 'duplicate'))),
+    ("icu_blocking_exit",
+     "those findings make the run fail, not just report",
+     lambda a: any('ICU' in f or 'plural' in f.lower() for f in a.failures)),
+
+    # ── graded down, so the check stays usable ──────────────────────────────
+    ("icu_dead_branch_low",
+     "zero in English is low severity, not a build breaker",
+     lambda a: [f['severity'] for f in
+                _icu_find(a, 'en', 'cart.zero_dead', 'dead_branch')] == ['low']),
+    ("icu_rare_form_low",
+     "Italian's million-only many is low severity",
+     lambda a: [f['severity'] for f in
+                _icu_find(a, 'it', 'cart.items_ok', 'missing_rare')] == ['low']),
+    ("icu_flattened",
+     "a plural flattened to a plain string in translation is medium",
+     lambda a: [f['severity'] for f in
+                _icu_find(a, 'ru', 'cart.flat', 'flattened')] == ['medium']),
+
+    # ── negatives: what must NOT be reported ────────────────────────────────
+    ("icu_correct_is_silent",
+     "a fully covered Russian plural produces nothing at all",
+     lambda a: _icu_find(a, 'ru', 'cart.items_ok') == []),
+    ("icu_select_names_are_free",
+     "male/female in a select are not judged against CLDR categories",
+     lambda a: _icu_find(a, 'en', 'cart.who') == []),
+    ("icu_apostrophe_safe",
+     "l'utente and a quoted brace do not confuse the parser",
+     lambda a: not [f for f in a.results['icu_plurals']
+                    if f['key'] in ('cart.apos', 'cart.quoted')
+                    and f['severity'] == 'high']),
+
+    ("icu_explicit_selector_ok",
+     "=1 covers the singular in a two-form language: nothing to report",
+     lambda a: _icu_find(a, 'en', 'cart.one_file') == []),
+    ("icu_explicit_not_a_free_pass",
+     "but =1 does NOT cover Russian one, which also fires at 21 and 31",
+     lambda a: bool(_icu_find(a, 'ru', 'cart.one_file', 'missing'))),
+
+    # ── the regression this fix exists for ──────────────────────────────────
+    ("icu_placeholder_not_confused",
+     "plural prose is no longer compared as if it were variable names",
+     lambda a: not [v for v in a.results['mismatched_vars']
+                    if v['key'] == 'cart.items_ok']),
+    ("icu_placeholder_sees_the_argument",
+     "the plural argument itself is what gets compared",
+     lambda a: UniversalQualityAnalyzer._extract_placeholders(
+         "{count, plural, one{# item} other{# items}}") == {'count'}),
+    ("icu_placeholder_nested",
+     "placeholders inside branch bodies are compared too",
+     lambda a: UniversalQualityAnalyzer._extract_placeholders(
+         "{count, plural, one{# item for {name}} other{# for {name}}}")
+     == {'count', 'name'}),
+    ("icu_placeholder_plain_untouched",
+     "a non-ICU string keeps the original behaviour exactly",
+     lambda a: UniversalQualityAnalyzer._extract_placeholders(
+         "Hello {name}, you have {n} files and %s") == {'name', 'n', '%s'}),
+]
+
+
+# ── Scenario 4: extraction precision ───────────────────────────────────────
+# What a parse tree knows and a regex cannot: which t() is a call. Also the
+# languages where a straight tree-sitter swap LOST keys during development
+# (Vue keeps its <script> as raw text, PHP returned no calls), which is why
+# the tree corrects the regex instead of replacing it.
+_SELF_TEST_FILES_EXTRACT = {
+    "locales/en.json": """{
+  "real": {"one": "First", "two": "Second"},
+  "vue": {"hello": "Hello"},
+  "php": {"key": "Key"}
+}""",
+    "locales/it.json": """{
+  "real": {"one": "Primo", "two": "Secondo"},
+  "vue": {"hello": "Ciao"},
+  "php": {"key": "Chiave"}
+}""",
+    "app.js": '''
+const good = t("real.one");
+const doc = "call it with t('ghost.in_a_string') if you like";
+const mid = compute();   // t("ghost.in_a_comment") left from the rewrite
+const tpl = t(`real.${which}`);
+''',
+    "widget.vue": """<template><p>{{ $t("vue.hello") }}</p></template>""",
+    "helper.php": """<?php echo __("php.key"); ?>""",
+    "extra.js": '''export const x = t("real.two");''',
+}
+
+
+def _extract_backend():
+    """Which backend actually read the .js files of the last analysis."""
+    return _EXTRACTION_BACKENDS.get(".js", "regex")
+
+
+_SELF_TEST_CASES_EXTRACT = [
+    ("extract_real_key",
+     "a genuine t() call is found by either backend",
+     lambda a: "real.one" in a.all_used_code_keys),
+    ("extract_template_prefix",
+     "a template literal still yields its dynamic prefix",
+     lambda a: "real." in a.all_dynamic_prefixes),
+    ("extract_vue_key",
+     "Vue keys survive: the tree corrects the regex, it does not replace it",
+     lambda a: "vue.hello" in a.all_used_code_keys),
+    ("extract_php_key",
+     "PHP keys survive for the same reason",
+     lambda a: "php.key" in a.all_used_code_keys),
+    ("extract_second_file",
+     "every non-Python file is read, not just the first",
+     lambda a: "real.two" in a.all_used_code_keys),
+    ("extract_string_is_not_a_call",
+     "t() written inside a string counts only for the regex backend",
+     lambda a: ("ghost.in_a_string" in a.all_used_code_keys)
+     == (_extract_backend() == "regex")),
+    ("extract_midline_comment",
+     "t() in a mid-line comment likewise: the regex only strips whole lines",
+     lambda a: ("ghost.in_a_comment" in a.all_used_code_keys)
+     == (_extract_backend() == "regex")),
+    ("extract_no_false_unresolved",
+     "and with a tree those two never raise a blocking unresolved-key finding",
+     lambda a: (not [k for k in a.results['unresolved_code_keys']
+                     if k.startswith('ghost.')])
+     or _extract_backend() == "regex"),
+]
+
+
 def _analyse_fixture(files: dict):
     """Write *files* to a temp project, analyse it, return the analyzer."""
     import codecs
@@ -2464,6 +3449,48 @@ def _run_self_test() -> int:
         print("  -- " + scenario)
         total += len(cases)
         _check_cases(analyzer, cases, failed)
+
+    # The ICU scenario runs TWICE: once on whatever plural rules the machine
+    # can supply (real CLDR when babel is installed), once forced onto the
+    # built-in table. Otherwise half the plural engine ships unexercised, and
+    # which half is decided by a package that may or may not be present.
+    # Same reasoning for the extraction backend: the JS scenario is
+    # replayed under both, and its findings must come out IDENTICAL — a
+    # backend that quietly moved a line number or dropped a key would keep
+    # every boolean case green while changing what the tool reports. The
+    # precision scenario is where the two are ALLOWED to differ, and each
+    # case there says which way.
+    global _FORCE_REGEX_EXTRACTION
+    js_shots = []
+    for forced in (False, True):
+        _FORCE_REGEX_EXTRACTION = forced
+        _ts_parser_cache.clear()
+        analyzer = _analyse_fixture(_SELF_TEST_FILES_EXTRACT)
+        print('  -- extraction (' + _extract_backend() + ')')
+        total += len(_SELF_TEST_CASES_EXTRACT)
+        _check_cases(analyzer, _SELF_TEST_CASES_EXTRACT, failed)
+        js = _analyse_fixture(_SELF_TEST_FILES_JS)
+        js_shots.append(sorted(
+            (i['file'], i['line'], i.get('col'), i['text'], i['severity'])
+            for i in js.results['hardcoded']))
+        js_shots[-1] += sorted(js.all_used_code_keys)
+    _FORCE_REGEX_EXTRACTION = False
+    total += 1
+    _check_cases(_analyse_fixture(_SELF_TEST_FILES_JS), [
+        ("extract_backends_agree",
+         "the JS scenario analyses identically under both backends",
+         lambda _a: js_shots[0] == js_shots[1]),
+    ], failed)
+
+    global _FORCE_BUILTIN_PLURALS
+    for forced in (False, True):
+        _FORCE_BUILTIN_PLURALS = forced
+        probe = _plural_categories('ru')
+        print('  -- icu plurals (' + (probe[2] if probe else 'no rules') + ')')
+        analyzer = _analyse_fixture(_SELF_TEST_FILES_ICU)
+        total += len(_SELF_TEST_CASES_ICU)
+        _check_cases(analyzer, _SELF_TEST_CASES_ICU, failed)
+    _FORCE_BUILTIN_PLURALS = False
     print("=" * 80)
     if failed:
         print(L("st_failed", n=len(failed), ids=", ".join(failed)))

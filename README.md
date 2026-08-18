@@ -30,13 +30,71 @@ quality budgets does so from an optional file in its own root.
 | 6 | **Hardcoded UI strings** — untranslated text reaching a widget, graded `high`/`medium`/`low` by how certain it is that a user sees it | 🚸 Graded | only past a declared budget |
 | 7 | **Orphan keys** — defined but never referenced, classified by confidence (dynamic-prefix families are flagged, never assumed dead) | 🚸 Medium | no |
 | 8 | **Mixed-language values** — e.g. English text inside the Italian dictionary, backed by stopword evidence + langdetect | ℹ️ Low | yes |
-| 9 | **Self-test** — the analyzer run against a synthetic project with planted problems, one assertion per behaviour | 🧪 Meta | on demand |
+| 9 | **ICU plural coverage** — a `plural` that omits a form its language actually selects, plus malformed messages, a missing `other`, misspelt or duplicated categories | 🚸 Graded | structural errors always; missing forms only with real CLDR rules |
+| 10 | **Self-test** — the analyzer run against a synthetic project with planted problems, one assertion per behaviour | 🧪 Meta | on demand |
+
+### On the plural check
+
+A Russian plural written with the two branches English needs passes every
+other check in this file: the key exists, the value is Russian, the
+placeholder is there. It is simply wrong for 2, 3, 4 and for 5 and up.
+
+Findings are graded by *how they were reached*, never by how confident the
+tool feels:
+
+| Finding | Needs a rule table? | Severity |
+|---|---|---|
+| No `other` branch, braces that never close, a keyword that is not a plural category, the same branch twice | no — ICU says so | 🔥 always blocking |
+| A form this language selects for everyday counts is missing (Russian `few`, Arabic `two`) | yes | ⚠️ blocking with Babel installed, capped at ⚠️ medium from the built-in table |
+| A form only millions, decimals or compact notation reach (Italian `many`) | yes | ℹ️ low |
+| A branch this language never selects (`zero` in English) | yes | ℹ️ low |
+| A plural in the source flattened to a plain string in a translation | no | 🚸 medium |
+
+That last split matters more than it looks: current CLDR gives Italian a
+`many` category, but it only fires from a million upwards. Demanding it
+would flag every correctly written Italian plural in existence. The tool
+tells the two apart by *running each language's own rules over real
+counts* rather than carrying a hand-written list of which languages are
+which — so the distinction stays right for languages this tool has never
+heard of.
+
+Unknown language, no rules available? The structural checks still run; the
+coverage ones stay quiet rather than guess.
+
+`select` is left alone apart from requiring `other` — its branch names are
+arbitrary (`male`/`female`/`other`), and judging them against CLDR
+categories would flag every correct gender select.
 
 **Collect-then-fail**: every check always runs, the Markdown report is
 always generated, and only at the very end does the process exit non-zero
 listing all blocking findings — one early failure never hides the rest.
 
 ## How it reads your code
+
+Python is read with the standard library's `ast`. Every other language is
+read with **tree-sitter** when its grammar is available (300+ of them:
+JS, TS, JSX/TSX, Vue, Svelte, PHP, Kotlin, Java, C#, Go, Rust, Ruby, Dart,
+QML…), and with a regex when it is not.
+
+The parse tree does not *replace* the regex, it **corrects** it, and that
+distinction was measured rather than assumed. A straight swap was written
+first and lost real keys: the Vue grammar keeps a `<script>` body as raw
+text without a language injection, and PHP returned no call nodes for the
+shapes in the fixture. Losing a key is the worse failure — it turns a live
+key into a false orphan and hides a real unresolved-key finding — so the
+rule is:
+
+> keys = (regex hits the tree cannot disprove) + (calls the tree found)
+
+A regex hit is dropped only when the tree can point at the string literal
+or the comment containing it. So `t('x')` written inside a string, or in a
+mid-line `// t('old.key')` the regex's whole-line comment stripping never
+saw, stops counting as usage — while everything tree-sitter cannot parse
+keeps the regex result untouched.
+
+Which backend read your sources is printed with the scan summary, so the
+answer is never a guess.
+
 
 **Python** sources get a **context-aware AST analysis**, not regexes:
 
@@ -228,14 +286,29 @@ and asserts each one:
   [OK  ] function_not_ignored   a string argument to a FUNCTION named get() still is
   [OK  ] vocab_loaded           the project's own tech_words reach the neutral vocabulary
   …
-🟢 Self-test passed (26 cases).
+🟢 Self-test passed (87 cases).
 ```
 
-Two scenarios run, not one: a JSON/Python project and a JavaScript one
-whose dictionaries live in a module under `src/`. One layout only ever
-proves itself — the second scenario exists because a real project
-reported *"no i18n dictionaries found"* while its
-`src/i18n/translations.js` sat right there.
+Three scenarios run, not one: a JSON/Python project, a JavaScript one
+whose dictionaries live in a module under `src/`, and an ICU one carrying
+Russian, Arabic and Italian plurals. One layout only ever proves itself —
+the JS scenario exists because a real project reported *"no i18n
+dictionaries found"* while its `src/i18n/translations.js` sat right there,
+and the ICU scenario exists because this codebase contains no ICU at all,
+so without a fixture the entire plural engine would ship unexercised.
+
+A fourth scenario covers extraction precision: `t()` written inside a
+string and inside a mid-line comment, next to genuine keys in Vue and PHP
+that an earlier design lost.
+
+Two scenarios run **twice**, under both of their backends, because
+otherwise which half of that code gets tested is decided by whichever
+optional package happens to be installed — the ICU one against real CLDR
+rules and against the built-in table, the extraction one with tree-sitter
+and without. On top of the per-case assertions, the JavaScript scenario is
+analysed under both extraction backends and its findings compared field by
+field: a backend that quietly moved a line number or dropped a key would
+keep every boolean case green while changing what the tool reports.
 
 The heuristics here are hand-curated lists, and a mistake in one is
 invisible on the codebase it was written against. The negative cases
@@ -278,6 +351,8 @@ script.
 - Python **3.10+**, standard library only for the core
 - `langdetect` — auto-installed on first run (mixed-language check)
 - `PyYAML` — optional, enables YAML i18n layouts
+- `Babel` — optional, swaps the built-in plural table for real CLDR rules and lets missing-form findings block
+- `tree-sitter` + `tree-sitter-language-pack` — optional, parse trees for non-Python sources instead of regex
 
 ### Offline use / vendored dependencies
 
@@ -294,9 +369,19 @@ offline (CI runners, air-gapped machines, packages gone from PyPI):
    ```
 
    On Windows: `download_offline_deps.bat` / `install_offline_deps.bat`.
-   The installer treats **PyYAML as optional** — it only matters for YAML
-   locale files, so if its wheel does not fit the target's OS/Python the
-   run says so and carries on; only a missing `langdetect` is fatal.
+   The installer treats **PyYAML, Babel and tree-sitter as optional** —
+   PyYAML only matters for YAML locale files, Babel only sharpens the ICU
+   plural check, tree-sitter only sharpens key extraction from non-Python
+   sources. If any is unavailable the run says so and carries on; only a
+   missing `langdetect` is fatal.
+
+   Two notes on size and portability. Babel is a 10 MB wheel because it
+   carries the whole CLDR database, which is precisely what makes it worth
+   vendoring for a plural checker. tree-sitter ships **compiled** wheels
+   with no practical sdist fallback — the language pack would have to build
+   every grammar from source — so a vendored copy fits the OS and Python it
+   was downloaded for, and elsewhere the regex extractor takes over. That is
+   what the fallback is for; nothing fails.
 
    By hand, if you prefer:
 
@@ -304,6 +389,8 @@ offline (CI runners, air-gapped machines, packages gone from PyPI):
    pip wheel langdetect --no-deps -w offline_deps    # universal wheel (any OS/Python 3)
    pip download langdetect pyyaml -d offline_deps    # six + platform pyyaml wheel + sdists
    pip download pyyaml --no-binary pyyaml -d offline_deps --no-deps  # pyyaml sdist: any OS
+   pip download babel -d offline_deps                # universal wheel, CLDR plural rules
+   pip download tree-sitter tree-sitter-language-pack -d offline_deps  # compiled: this OS/Python
    ```
 
    When the folder is present, the auto-installer uses it **first** with
@@ -311,7 +398,8 @@ offline (CI runners, air-gapped machines, packages gone from PyPI):
    missing or insufficient. Note: wheels are OS/Python-specific — the
    sdists (`.tar.gz`) cover every platform.
 
-2. **Pre-install** in the target environment: `pip install langdetect pyyaml`.
+2. **Pre-install** in the target environment:
+   `pip install langdetect pyyaml babel tree-sitter tree-sitter-language-pack`.
 
 With either in place the tool never touches the network.
 

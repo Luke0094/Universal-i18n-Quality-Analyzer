@@ -3,7 +3,7 @@
 #  Universal i18n Quality Analysis - install deps with NO
 #  network access (Unix)
 #  Installs the analyzer's two dependencies from the local
-#  offline_deps/ folder. PyYAML is OPTIONAL — it is only needed
+#  offline_deps/ folder. PyYAML, Babel and tree-sitter are OPTIONAL — it is only needed
 #  for YAML locale layouts, and a failure to install it is
 #  reported without failing the run.
 #  Usage:  ./install_offline_deps.sh
@@ -55,6 +55,22 @@ else
     YAML="no"
 fi
 
+echo "[..] Installing Babel (optional, for authoritative CLDR plural rules)..."
+# shellcheck disable=SC2086
+if "${PY}" -m pip install ${PIP_ARGS} babel; then
+    BABEL="yes"
+else
+    BABEL="no"
+fi
+
+echo "[..] Installing tree-sitter (optional, parse trees for non-Python sources)..."
+# shellcheck disable=SC2086
+if "${PY}" -m pip install ${PIP_ARGS} tree-sitter tree-sitter-language-pack; then
+    TREESITTER="yes"
+else
+    TREESITTER="no"
+fi
+
 echo
 echo "[OK] langdetect installed."
 if [ "${YAML}" = "yes" ]; then
@@ -62,6 +78,19 @@ if [ "${YAML}" = "yes" ]; then
 else
     echo "[--] PyYAML not installed - JSON and JS/TS locales still work."
     echo "     Only .yml / .yaml dictionaries will be skipped."
+fi
+if [ "${BABEL}" = "yes" ]; then
+    echo "[OK] Babel installed - ICU plural rules checked against real CLDR."
+else
+    echo "[--] Babel not installed - ICU plural coverage still checked,"
+    echo "     from a smaller built-in table, and never blocking."
+fi
+if [ "${TREESITTER}" = "yes" ]; then
+    echo "[OK] tree-sitter installed - JS/TS/Vue/PHP/Kotlin/Go/… read from a parse tree."
+else
+    echo "[--] tree-sitter not installed - non-Python sources fall back"
+    echo "     to the regex extractor. Keys are still found; a t() written"
+    echo "     inside a string or a mid-line comment may count as one."
 fi
 echo "     Run:  ./quality_analysis.sh"
 exit 0
