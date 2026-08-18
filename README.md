@@ -286,7 +286,19 @@ auto-install of `langdetect` on first run. Two ways to make runs fully
 offline (CI runners, air-gapped machines, packages gone from PyPI):
 
 1. **Vendored folder (recommended)** — ship an `offline_deps/` folder
-   next to the script. Populate it once, from any online machine:
+   next to the script. Two scripts do both halves:
+
+   ```bash
+   ./download_offline_deps.sh    # once, on a machine WITH network
+   ./install_offline_deps.sh     # on the offline machine
+   ```
+
+   On Windows: `download_offline_deps.bat` / `install_offline_deps.bat`.
+   The installer treats **PyYAML as optional** — it only matters for YAML
+   locale files, so if its wheel does not fit the target's OS/Python the
+   run says so and carries on; only a missing `langdetect` is fatal.
+
+   By hand, if you prefer:
 
    ```bash
    pip wheel langdetect --no-deps -w offline_deps    # universal wheel (any OS/Python 3)
