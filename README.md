@@ -108,28 +108,58 @@ Hardcoded-string detection distinguishes strings passed to Qt widget
 setters/constructors (`setText`, `QLabel`, …) from generic literals, with
 per-tier filtering to keep the noise down.
 
-**Other languages** go through a regex key extractor:
+**Other languages** are read for the same two things:
 
 - calls — `t('key')`, `$t('key')`, `i18n.t("key")`, `__('key')`, `tr(...)`…
 - template-literal prefixes — `` t(`nav.${page}`) `` keeps the `nav.*`
   family alive for the orphan analysis
 
 That covers the cross-language checks (**unresolved keys** and
-**orphans**) on any codebase. Commented-out code is stripped first, so a
-stale `// t('old.key')` never raises a false blocking finding; minified
-bundles (`*.min.js`) are skipped.
+**orphans**) on any codebase. Minified bundles (`*.min.js`) and generated
+output are skipped by shape, not by name.
+
+Commented-out code never counts as usage, but the two backends earn that
+differently, and the difference is the reason the tree is worth having.
+The regex has to blank comments before it can look, which means guessing
+where one starts: it strips `/* … */` and whole-line `//` or `#`, and
+deliberately leaves a mid-line `//` alone because eating that would eat
+the `//` in every `https://` inside a string. So a stale
+`doThing();  // t('old.key')` still counted. The tree does not guess —
+it knows which bytes are a comment and which are a string literal, and a
+match landing in either is dropped.
 
 ### Coverage guarantee by language tier
 
 Estimated share of real-world key usages the extractor captures — every
-run prints how many files were scanned in which mode:
+run prints how many files were scanned in which mode, and which backend
+read them.
 
 | Tier | Languages | Method | Key extraction | Hardcoded detection | Notes |
 |------|-----------|--------|:---:|:---:|-------|
-| **Full** | Python | AST | ~99% | ✅ | Literals, f-string prefixes, variables, concatenation, ternaries; severity-graded hardcoded detection with `line:column` and source preview |
-| **High** | JS, TS, JSX/TSX, Vue, Svelte, PHP | regex | ~90% | ⚠️ hints | Dotted-key `t()`-style calls are the ecosystem norm (`i18next`, `vue-i18n`, Laravel `__()`); misses keys held in variables or built by concatenation |
-| **Conditional** | Dart, Kotlin, Java, C#, Ruby, Go, Rust | regex | ~60–75% | ❌ | Captured **only if** the project uses a dotted-key `t()`-style API; ecosystem-native resource systems (Android `R.string`, .NET `.resx`, Flutter ARB codegen) are not parsed |
-| **Low** | QML | regex | ~40% | ❌ | `qsTr("English text")` is text-based, not key-based — only key-style helper calls are caught |
+| **Full** | Python | `ast` (stdlib) | ~99% | ✅ | Literals, f-string prefixes, variables, concatenation, ternaries; severity-graded hardcoded detection with `line:column` and source preview |
+| **High** | JS, TS, JSX/TSX, Vue, Svelte, PHP | tree-sitter → regex | ~90% | ⚠️ hints | Dotted-key `t()`-style calls are the ecosystem norm (`i18next`, `vue-i18n`, Laravel `__()`); misses keys held in variables or built by concatenation |
+| **Conditional** | Dart, Kotlin, Java, C#, Ruby, Go, Rust | tree-sitter → regex | ~60–75% | ❌ | Captured **only if** the project uses a dotted-key `t()`-style API; ecosystem-native resource systems (Android `R.string`, .NET `.resx`, Flutter ARB codegen) are not parsed |
+| **Low** | QML | tree-sitter → regex | ~40% | ❌ | `qsTr("English text")` is text-based, not key-based — only key-style helper calls are caught |
+
+Grammars are present for every extension in the table, so "→ regex" is
+the fallback for a machine where tree-sitter is not installed, not for a
+language it cannot handle.
+
+**What the parse tree does and does not change.** It does not raise the
+percentages above, and the reason is structural: the tree *corrects* the
+regex rather than replacing it, so the set of keys found is the union of
+both and recall can only be ≥ the regex's own. What improves is
+**precision** — a `t('x')` written inside a string literal, or inside a
+mid-line `// t('old.key')` that whole-line comment stripping never saw,
+stops counting as a usage. Both used to inflate the "used keys" set,
+which hides real orphans and can raise a blocking unresolved-key finding
+for a key nobody actually calls. Dynamic prefixes are read from the tree
+too, so `` gettext(`menu.${x}`) `` yields its family even though the
+prefix regex only knows the shorter list of function names.
+
+On a project with no such cases nothing moves at all: a real-world
+JS/JSX codebase measured here reported identical findings with the tree
+and without it.
 
 Percentages are honest engineering estimates, not measurements: they
 describe how much of each ecosystem's *typical* usage the patterns can
@@ -137,12 +167,20 @@ see. When a tier's assumptions don't hold for your project, the
 locale-vs-locale checks (1, 2, 4, 5, 8) still apply in full — only the
 code-aware checks (3, 7) degrade.
 
-**Hardcoded strings outside Python — hints only.** A bare string in
-JS/TS says nothing about itself — it could be UI text, a CSS selector,
-an object key or a log message. Python's AST provides the call context
-(`setText(...)` → user-visible) that makes the check reliable; a regex
-can't. Non-Python sources therefore get a **minimal heuristic tier**,
-reported under its own section explicitly labelled *LOW RELIABILITY*:
+**Hardcoded strings outside Python — hints only, still.** A bare string
+in JS/TS says nothing about itself: it could be UI text, a CSS selector,
+an object key or a log message. Python's AST supplies the call context
+(`setText(...)` → user-visible) that makes the check reliable.
+
+tree-sitter could now supply that same context for the languages above,
+and deliberately does not yet. This tier feeds the severity budgets, and
+budgets are a ratchet: rewiring it would move the numbers of every
+project already pinned to a ceiling, with no way to tell a real
+regression from a backend difference. It is the obvious next step, and
+it wants its own before/after gate rather than a free ride on this one.
+
+So non-Python sources keep the **minimal heuristic tier**, reported under
+its own section explicitly labelled *LOW RELIABILITY*:
 
 - UI-ish attributes — `placeholder=`, `title=`, `label=`, `tooltip=`, …
 - dialog-like calls — `alert("…")`, `setText("…")`, `Text("…")`, …
@@ -417,6 +455,11 @@ With either in place the tool never touches the network.
 - **The tool is tested against itself** — see `--self-test`. Its
   heuristics are curated lists, and the only thing that catches a wrong
   one is an assertion, not a clean-looking report.
+- **Optional dependencies never change the verdict silently.** Babel and
+  tree-sitter each sharpen a check, and each is replayed in the self-test
+  with and without, so neither ships as the half that happens to be
+  installed. Where an optional backend could disagree with the fallback,
+  the run says which one answered.
 - Directories named `build`, `dist`, `venv`, `__pycache__`, `tests`,
   `node_modules` (and any dot-directory) are excluded from the code scan.
 
