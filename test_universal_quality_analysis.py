@@ -167,8 +167,30 @@ _L10N = {
                         "it": "🔤 Testi Hardcoded — sorgenti non-Python (BASSA AFFIDABILITÀ)"},
     "tier_rx_d":      {"en": "⚠️ Heuristic hints WITHOUT syntax context: expect false positives AND missed strings. UI-ish attributes (placeholder/title/label…), dialog-like calls and multi-word template text nodes only. Treat as hints, verify by hand.",
                         "it": "⚠️ Indizi euristici SENZA contesto sintattico: aspettati falsi positivi E stringhe mancate. Solo attributi UI (placeholder/title/label…), chiamate tipo dialog e nodi di testo multi-parola nei template. Trattali come indizi, verifica a mano."},
-    "r_line":         {"en": "- [Line {line}]({rp}#L{line}): `{text}`\n",
-                        "it": "- [Linea {line}]({rp}#L{line}): `{text}`\n"},
+    "r_line":         {"en": "- [{line}:{col}]({rp}#L{line}): `{text}`\n",
+                        "it": "- [{line}:{col}]({rp}#L{line}): `{text}`\n"},
+    "r_preview":      {"en": "  ↳ `{preview}`\n",
+                        "it": "  ↳ `{preview}`\n"},
+    "st_header":      {"en": "🧪 SELF-TEST — the analyzer checked against itself",
+                        "it": "🧪 AUTO-TEST — l'analizzatore verificato su se stesso"},
+    "st_passed":      {"en": "🟢 Self-test passed ({n} cases).",
+                        "it": "🟢 Auto-test superato ({n} casi)."},
+    "st_failed":      {"en": "❌ Self-test FAILED — {n} case(s): {ids}",
+                        "it": "❌ Auto-test FALLITO — {n} caso/i: {ids}"},
+    "cfg_unreadable":  {"en": "   ⚠️ {file} could not be read ({err}) — built-in defaults only",
+                        "it": "   ⚠️ {file} non leggibile ({err}) — solo impostazioni predefinite"},
+    "an_severity":    {"en": "🎚️ FINDINGS BY SEVERITY...",
+                        "it": "🎚️ RISULTATI PER GRAVITÀ..."},
+    "sev_count":      {"en": "   {level}: {n}",
+                        "it": "   {level}: {n}"},
+    "sev_no_budget":  {"en": "   ℹ️ informational — declare \"budgets\" in "
+                             "{file} to make these blocking",
+                        "it": "   ℹ️ informativo — dichiara \"budgets\" in "
+                             "{file} per renderli bloccanti"},
+    "fail_budget":    {"en": "{level}-severity hardcoded texts: {n} "
+                             "(budget {max})",
+                        "it": "testi hardcoded di gravità {level}: {n} "
+                             "(budget {max})"},
     "r_unresolved_h": {"en": "## 🧩 Keys used in code but not defined\n> Passed literally to a t()-family call, absent from every locale — they render as raw keys in the UI.\n\n",
                         "it": "## 🧩 Chiavi usate nel codice ma non definite\n> Passate letteralmente a una chiamata t(), assenti da ogni locale — in UI appaiono come chiave grezza.\n\n"},
     "r_missing_h":    {"en": "## 🔑 Missing keys\n", "it": "## 🔑 Chiavi Mancanti\n"},
@@ -224,8 +246,16 @@ _load_language_packs()
 TOOL_LANGS = sorted({lang for msg in _L10N.values() for lang in msg})
 
 
-def L(key: str, **kw) -> str:
-    msg = _L10N[key]
+def L(msg_id: str, /, **kw) -> str:
+    """Look up a tool message and format it.
+
+    The id is POSITIONAL-ONLY on purpose: it used to be a normal parameter
+    named ``key``, so any message with a ``{key}`` placeholder — the
+    mixed-language report line among them — collided with it and raised
+    "got multiple values for argument 'key'". That crashed report generation
+    on exactly the runs that had something to report.
+    """
+    msg = _L10N[msg_id]
     text = msg.get(TOOL_LANG) or msg["en"]
     return text.format(**kw) if kw else text
 
@@ -344,6 +374,25 @@ _RX_CODE_TEMPLATE = re.compile(
 _RX_CODE_COMMENTS = re.compile(r"/\*.*?\*/|^[ \t]*(?://|#).*?$", re.S | re.M)
 
 
+_PREVIEW_MAX = 120
+
+
+def _preview(lines: List[str], lineno: int) -> str:
+    """The source line a finding sits on, trimmed for the report.
+
+    The matched string alone often says nothing: `` ` should start at byte ` ``
+    is unreadable until you can see it is the tail of an exception message.
+    Showing the line it came from turns a coordinate into something you can
+    judge without opening the file.
+    """
+    if not (0 < lineno <= len(lines)):
+        return ""
+    text = lines[lineno - 1].strip()
+    if len(text) > _PREVIEW_MAX:
+        text = text[:_PREVIEW_MAX - 1].rstrip() + "…"
+    return text.replace("`", "'")      # keep the Markdown code span intact
+
+
 def _blank_comments(src: str) -> str:
     """Replace comments with whitespace of the SAME shape (newlines kept),
     so offsets and line numbers of every later match stay valid."""
@@ -376,8 +425,38 @@ _RX_UI_ATTR = re.compile(
 _RX_UI_CALL = re.compile(
     r"""\b(?:alert|confirm|prompt|setText|setTitle|setLabel|setPlaceholder"""
     r"""|setTooltip|setHeader|showMessage|Text|Label|SnackBar)\s*\(\s*(['"])([^'"\n]{3,80})\1""")
+# setAttribute("placeholder", "text") / el.attr("title", "text"): the visible
+# text is the SECOND argument, so neither the attribute pattern (which wants
+# name = "value") nor the call pattern (which reads the first argument) could
+# see it — a very common way to set visible text in plain JS.
+_RX_UI_SETATTR = re.compile(
+    r"""\b(?:setAttribute|attr|setProperty)\s*\(\s*['"]"""
+    r"""(?:placeholder|title|label|alt|aria-label|tooltip)['"]\s*,\s*"""
+    r"""(['"])([^'"\n]{3,80})\1""", re.IGNORECASE)
+# Operators that mean the capture came from code, not from a template.
+_RX_CODE_SHAPED = re.compile(r'&&|\|\||=>|===|!==|\?\.|;\s|\+\+|--')
 _RX_UI_TEXTNODE = re.compile(r">\s*([^<>{}\n|]{4,80}?)\s*<")
 _TEXTNODE_EXTENSIONS = {'.vue', '.jsx', '.tsx', '.svelte'}
+
+
+# A build artefact is recognised by its SHAPE, not its name. ".min." is one
+# convention among many — Vite and friends emit index-4PCLXdBb.js, which no
+# name test catches, and scanning one duplicated every string already found
+# in the sources plus a lot of minifier noise. A line of a few hundred
+# characters is normal; one of several thousand is a bundle.
+_GENERATED_MAX_LINE = 600
+_GENERATED_MEAN_LINE = 300
+
+
+def _looks_generated(src: str) -> bool:
+    """True for minified or machine-generated sources, whatever they're called."""
+    lines = src.splitlines()
+    if not lines:
+        return False
+    longest = max(len(line) for line in lines)
+    if longest > _GENERATED_MAX_LINE:
+        return True
+    return (sum(len(line) for line in lines) / len(lines)) > _GENERATED_MEAN_LINE
 
 
 def _looks_like_ui_text(text: str) -> bool:
@@ -392,31 +471,51 @@ def _looks_like_ui_text(text: str) -> bool:
         return False                        # URL / path
     if re.fullmatch(r'[A-Z0-9_ ]+', t):
         return False                        # SHOUTING_CONSTANTS
+    if _RX_CODE_SHAPED.search(t):
+        # The text-node pattern reads "> … <", which in plain JS also spans
+        # a pair of comparison operators: `length > 0 && depth < max` was
+        # being reported as the UI string "0 && depth". Operators are the
+        # tell — no interface label contains `&&` or `=>`.
+        return False
+    if t[0] in ')]}' or t[-1] in '([{':
+        # A capture that opens or closes a bracket it does not own came from
+        # the middle of an expression, not from a template. In JSX the
+        # branches of a ternary look exactly like this: `) : cond ? (`.
+        return False
     return True
 
 
-def _extract_hardcoded_regex(src: str, ext: str) -> List[Tuple[int, str]]:
-    """Low-confidence hardcoded-text hints with 1-based line numbers.
+def _extract_hardcoded_regex(src: str, ext: str) -> List[Tuple[int, int, str]]:
+    """Low-confidence hardcoded-text hints as ``(line, column, text)``.
     Comments are blanked shape-preservingly, so line numbers are exact;
     a line containing 'i18n-ignore' is skipped like in the AST path."""
     clean = _blank_comments(src)
     lines = src.splitlines()
-    out: List[Tuple[int, str]] = []
+    out: List[Tuple[int, int, str]] = []
     seen: Set[str] = set()
 
     def _add(m, group_idx):
         text = m.group(group_idx).strip()
         if not _looks_like_ui_text(text) or text in seen:
             return
-        lineno = clean.count('\n', 0, m.start()) + 1
+        # Both coordinates from the start of the CAPTURED GROUP, never from
+        # the match: _RX_UI_TEXTNODE's leading whitespace class can cross a
+        # newline, so a text node indented under its tag was reported on the
+        # tag's line, with a column measured against a different one.
+        start = m.start(group_idx)
+        lineno = clean.count(chr(10), 0, start) + 1
         if 0 < lineno <= len(lines) and 'i18n-ignore' in lines[lineno - 1]:
             return
+        # 1-based, like every compiler diagnostic, so an editor can jump to it.
+        col = start - (clean.rfind(chr(10), 0, start) + 1) + 1
         seen.add(text)
-        out.append((lineno, text))
+        out.append((lineno, col, text))
 
     for m in _RX_UI_ATTR.finditer(clean):
         _add(m, 2)
     for m in _RX_UI_CALL.finditer(clean):
+        _add(m, 2)
+    for m in _RX_UI_SETATTR.finditer(clean):
         _add(m, 2)
     if ext in _TEXTNODE_EXTENSIONS:
         for m in _RX_UI_TEXTNODE.finditer(clean):
@@ -473,87 +572,424 @@ _STOPWORDS: Dict[str, Set[str]] = {
 # Languages langdetect notoriously mis-fires on for SHORT latin-script text
 # (statistical noise, not real detections). A flag from these needs far more
 # evidence than one from a well-separated language.
+# Below this many informative words, langdetect is guessing: there is no
+# function-word evidence to corroborate it, and it still reports 1.00.
+_DETECT_MIN_WORDS = 8
+
 _LANGDETECT_NOISE = {'cy','ro','ca','so','sw','tl','af','sq','hr','sl','et',
                      'lv','lt','id','ms','fi','eu','gl','da','no','nb','nl'}
 
-_TECH_WORDS = {
-    'oauth','api','json','xml','url','sdk','gcp','http','https','webdav',
-    'rclone','mega','dropbox','onedrive','google','drive','nextcloud',
-    'microsoft','windows','linux','macos','steam','desktop','app','client',
-    'server','id','token','key','secret','password','username',
+# Words that carry no language: they are spelled the same in every locale, so
+# they are never evidence that a string was left in the wrong language.
+#
+# ONLY genuinely cross-project vocabulary belongs here. A vendor name, a
+# product, an engine, a site — those are the scanned project's business, not
+# this tool's, and hardcoding one project's list here is what made the tool
+# quietly wrong for every other project: their own domain words are absent,
+# so each one becomes foreign-language evidence and the mixed-language check
+# fills with false alarms.
+#
+# A project extends the set with its own terms via PROJECT_VOCAB_FILE — see
+# the project file (see PROJECT_VOCAB_FILE). Nothing to edit in here.
+# The line is drawn by REACH, not by category. These words are stripped
+# before the string is handed to langdetect, so a name left out of the set is
+# fed to a statistical language detector as if it were prose — which is how a
+# short technical label with no function words gets flagged as the wrong
+# language. Since none of them is a function word in any language, keeping
+# one can never mask real evidence: the cost of including is ~zero, the cost
+# of omitting is a false alarm. So anything a typical project might plausibly
+# name — the big clouds, the operating systems, the protocols — belongs here
+# even though it is a brand. Only names specific to ONE domain go in the
+# project file, because a generic tool has no business knowing them.
+_TECH_WORDS_BUILTIN = {
+    # Protocols, formats, plumbing
+    'oauth','api','json','xml','url','sdk','http','https','webdav','gcp',
+    'app','client','server','id','token','key','secret','password','username',
     'scoped','access','full','service','account','create','redirect',
-    'savesync','editor','console','portal','azure','credentials',
-    'itch','dlsite','mobygames','wikipedia','brave','bing','searxng',
-    'duckduckgo','vndb','renpy','unity','regedit','playerprefs','backup',
-    'cloud','web','pc','zip','trusted','online','offline','link','tag',
-    'hotkey','overlay','provider','timeout','host','path','file','files',
+    'editor','console','portal','credentials',
+    'backup','cloud','web','pc','zip','trusted','online','offline','link','tag',
+    'provider','timeout','host','path','file','files','desktop','drive',
+    # Operating systems and the major clouds — named by a large share of
+    # projects, and never a function word anywhere.
+    'windows','linux','macos','android','ios',
+    'google','microsoft','azure','aws','dropbox','onedrive','nextcloud',
 }
+
+# Optional, project-supplied vocabulary. Same idea as the qa_lang_<code>.json
+# packs this tool reads for its own UI language: drop a file in, no edit here.
+# One optional file per project, read from the scanned root. Keys:
+#   tech_words    — brand/domain names the language detector must ignore
+#   ui_functions  — extra call names whose string args reach the screen
+#   budgets       — per-severity ceilings that make findings blocking
+PROJECT_VOCAB_FILE = ".i18n-quality.json"
+_project_config_cache: Optional[dict] = None
+# Whether the file was present and readable, for the run summary: a
+# configuration that is quietly ignored is worse than none at all.
+_config_state: dict = {"found": True, "error": ""}
+
+
+def _tech_words() -> Set[str]:
+    """The full neutral vocabulary: universal built-ins + this project's."""
+    return _TECH_WORDS_BUILTIN | _project_config_list("tech_words")
+
+
+def _project_config() -> dict:
+    """Parsed ``<PROJECT_ROOT>/.i18n-quality.json``, or ``{}``.
+
+    Lazy for the same reason as the vocabulary: ``--root`` reassigns
+    PROJECT_ROOT after this module is imported.
+    """
+    global _project_config_cache
+    if _project_config_cache is None:
+        data: dict = {}
+        try:
+            path = PROJECT_ROOT / PROJECT_VOCAB_FILE
+            if path.is_file():
+                # utf-8-SIG, not utf-8: Notepad and Windows PowerShell write
+                # a BOM by default, and a BOM makes json.loads fail, which
+                # this except would swallow — the user's whole configuration
+                # silently ignored because of an invisible byte.
+                loaded = json.loads(path.read_text(encoding="utf-8-sig"))
+                if isinstance(loaded, dict):
+                    data = loaded
+            else:
+                _config_state["found"] = False
+        except Exception as exc:
+            # Said out loud, not swallowed: a configuration file that is
+            # present but unreadable used to leave the run silently using
+            # built-ins only, which looks exactly like a clean pass.
+            print(L("cfg_unreadable", file=PROJECT_VOCAB_FILE, err=exc))
+            _config_state["error"] = str(exc)
+            data = {}
+        _project_config_cache = data
+    return _project_config_cache
+
+
+def _project_config_list(key: str) -> Set[str]:
+    raw = _project_config().get(key)
+    if not isinstance(raw, list):
+        return set()
+    return {str(v).strip().lower() for v in raw if str(v).strip()}
+
+
+def _ui_funcs() -> Set[str]:
+    """UI-displaying call names: built-ins plus the project's own widgets.
+
+    Case is preserved here, unlike the vocabulary: these are identifiers.
+    """
+    raw = _project_config().get("ui_functions")
+    extra = ({str(v).strip() for v in raw if str(v).strip()}
+             if isinstance(raw, list) else set())
+    return PythonCodeAnalyzer._UI_FUNCS_BUILTIN | extra
+
+
+# ── Severity ────────────────────────────────────────────────────────────────
+# A flat list of findings is an inventory; a report that always ends "all
+# blocking checks passed" while listing hundreds of them teaches the reader to
+# ignore it. Severity is what turns it into a worklist, and what lets a
+# project set a budget it must not exceed (see _project_budgets).
+SEVERITY_ORDER = ("high", "medium", "low")
+_CONTEXT_SEVERITY = {
+    # Argument to a call that puts text on screen — user-visible almost by
+    # definition, and the reason this tool exists.
+    'ui': 'high',
+    'regex_ui': 'high',
+    # A label-shaped string handed to a function we do not know.
+    'func_arg': 'medium',
+    # Passed the general heuristics and nothing more. Often an exception
+    # message or internal diagnostic, which no one is asking to translate.
+    'general': 'low',
+}
+
+
+def _severity_for(context: str) -> str:
+    return _CONTEXT_SEVERITY.get(context, 'low')
+
+
+def _project_budgets() -> Dict[str, int]:
+    """Per-severity ceilings from the project file, if it sets any.
+
+    Absent means informational, exactly as before — a tool that starts
+    failing builds the day it is upgraded would just be turned off.
+    """
+    raw = _project_config().get("budgets")
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, int] = {}
+    for level in SEVERITY_ORDER:
+        value = raw.get(level)
+        if isinstance(value, int) and value >= 0:
+            out[level] = value
+    return out
 
 # ==========================================
 # 🔎 AUTO-DISCOVERY
 # ==========================================
+# ── JavaScript / TypeScript dictionary modules ──────────────────────────────
+# The JS ecosystem very often keeps its dictionaries in a module rather than
+# in JSON:  export const translations = { it: {...}, en: {...} }
+# Reading t('key') out of JavaScript while being unable to read the
+# JavaScript that DEFINES those keys left whole projects reporting
+# "no i18n dictionaries found" — the tool saw the calls and none of the data.
+_JS_MODULE_EXTENSIONS = {'.js', '.mjs', '.cjs', '.ts', '.mts'}
+
+_JS_OBJECT_START = re.compile(
+    r"""(?:export\s+default|export\s+const\s+[\w$]+\s*=|"""
+    r"""module\.exports\s*=|const\s+[\w$]+\s*=)\s*\{""")
+_JS_IDENT = re.compile(r"[A-Za-z_$][\w$]*")
+
+
+def _js_object_to_json(text: str) -> Optional[str]:
+    """Normalise a JS object literal into JSON, or None if it is not one.
+
+    A scanner rather than a pile of regexes, because everything that needs
+    fixing — bare keys, single quotes, trailing commas, comments — also
+    occurs INSIDE string values, where it must be left alone. Tracking
+    string state is the only way to tell the two apart.
+
+    Deliberately conservative: anything whose values are not plain strings,
+    numbers, booleans, null or nested objects/arrays is rejected rather
+    than guessed at, so a module holding functions or template literals is
+    reported as unreadable instead of silently half-parsed.
+    """
+    match = _JS_OBJECT_START.search(text)
+    if not match:
+        return None
+    i = match.end() - 1          # position of the opening brace
+    out: List[str] = []
+    depth = 0
+    n = len(text)
+    expect_key = False
+    while i < n:
+        ch = text[i]
+        # ── strings ──
+        if ch in "\"'`":
+            if ch == '`':
+                return None       # template literal: not a static dictionary
+            quote = ch
+            j = i + 1
+            buf: List[str] = []
+            while j < n:
+                c = text[j]
+                if c == '\\':
+                    buf.append(text[j:j + 2])
+                    j += 2
+                    continue
+                if c == quote:
+                    break
+                if c == '\n':
+                    return None   # unterminated string
+                buf.append('\\"' if c == '"' else c)
+                j += 1
+            out.append('"' + ''.join(buf) + '"')
+            i = j + 1
+            expect_key = False
+            continue
+        # ── comments ──
+        if ch == '/' and i + 1 < n and text[i + 1] == '/':
+            i = text.find('\n', i)
+            if i == -1:
+                break
+            continue
+        if ch == '/' and i + 1 < n and text[i + 1] == '*':
+            end = text.find('*/', i + 2)
+            if end == -1:
+                break
+            i = end + 2
+            continue
+        # ── structure ──
+        if ch == '{' or ch == '[':
+            depth += 1
+            out.append(ch)
+            expect_key = (ch == '{')
+            i += 1
+            continue
+        if ch == '}' or ch == ']':
+            depth -= 1
+            # Trailing comma: whitespace was emitted between it and the
+            # closing brace, so the popping has to walk past that too — the
+            # first version only looked at the immediately previous token
+            # and left every trailing comma in place.
+            while out and (not out[-1].strip() or out[-1].strip() == ','):
+                if out.pop().strip() == ',':
+                    break
+            out.append(ch)
+            i += 1
+            if depth == 0:
+                return ''.join(out)
+            expect_key = False
+            continue
+        if ch == ',':
+            out.append(ch)
+            expect_key = True
+            i += 1
+            continue
+        if ch == ':':
+            out.append(ch)
+            expect_key = False
+            i += 1
+            continue
+        if ch.isspace():
+            out.append(' ')
+            i += 1
+            continue
+        # ── bare identifier: a key to quote, or a literal to keep ──
+        ident = _JS_IDENT.match(text, i)
+        if ident:
+            word = ident.group(0)
+            after = i + len(word)
+            while after < n and text[after].isspace():
+                after += 1
+            if after < n and text[after] == ':' and expect_key:
+                out.append('"' + word + '"')
+            elif word in ('true', 'false', 'null'):
+                out.append(word)
+            elif word == 'undefined':
+                out.append('null')
+            else:
+                return None        # a reference or a call — not static data
+            i = ident.end()
+            continue
+        if ch.isdigit() or (ch == '-' and i + 1 < n and text[i + 1].isdigit()):
+            j = i + 1
+            while j < n and (text[j].isdigit() or text[j] in '.eE+-'):
+                j += 1
+            out.append(text[i:j])
+            i = j
+            continue
+        return None                # anything else: give up rather than guess
+    return None
+
+
+def _load_js_module_dict(path: Path) -> Optional[dict]:
+    """Parse a JS/TS translations module into a plain dict."""
+    try:
+        text = path.read_text(encoding='utf-8', errors='replace')
+    except OSError:
+        return None
+    as_json = _js_object_to_json(text)
+    if not as_json:
+        return None
+    try:
+        data = json.loads(as_json)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
 _LOCALE_DIR_NAMES = {'i18n', 'locales', 'locale', 'lang', 'languages', 'translations', 'l10n'}
 _SINGLE_FILE_NAMES = {'translations', 'strings', 'messages', 'i18n', 'lang', 'locale'}
-_DATA_EXTENSIONS = {'.json'}
+_DATA_EXTENSIONS = {'.json'} | _JS_MODULE_EXTENSIONS
 if yaml_mod:
     _DATA_EXTENSIONS |= {'.yml', '.yaml'}
 
 
-def _discover_locale_sources(root: Path) -> Tuple[List[Path], List[Path]]:
-    """Return (directories_with_per_lang_files, single_multilang_files)."""
-    per_lang_dirs: List[Path] = []
-    single_files: List[Path] = []
+# How deep to hunt for a locale directory. The layout that matters here is
+# src/i18n — the default in every Vite/CRA/Vue project — and app/locales,
+# frontend/src/i18n and friends; scanning only the root's immediate children
+# meant those projects were told they had no dictionaries at all.
+_LOCALE_SEARCH_DEPTH = 4
 
-    for child in sorted(root.iterdir()):
+
+def _locale_search_dirs(root: Path) -> List[Path]:
+    """*root* and every non-excluded directory beneath it, bounded by depth."""
+    found = [root]
+    frontier = [(root, 0)]
+    while frontier:
+        current, depth = frontier.pop()
+        if depth >= _LOCALE_SEARCH_DEPTH:
+            continue
+        try:
+            children = sorted(current.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            if not child.is_dir():
+                continue
+            if child.name.startswith('.') or child.name in PYTHON_EXCLUDES:
+                continue
+            found.append(child)
+            frontier.append((child, depth + 1))
+    return found
+
+
+def _has_lang_files(directory: Path) -> bool:
+    """True when *directory* holds per-language dictionary files (en.json…)."""
+    try:
+        return any(
+            f.stem.lower().replace('-', '_').split('_')[0] in _ISO_CODES
+            and f.suffix.lower() in _DATA_EXTENSIONS
+            for f in directory.iterdir() if f.is_file()
+        )
+    except OSError:
+        return False
+
+
+def _scan_dir_for_locales(parent: Path,
+                          per_lang_dirs: List[Path],
+                          single_files: List[Path]) -> None:
+    """Collect locale sources found directly under *parent*."""
+    try:
+        children = sorted(parent.iterdir())
+    except OSError:
+        return
+    for child in children:
         if child.name.startswith('.') or child.name in PYTHON_EXCLUDES:
             continue
 
-        # Check directories
         if child.is_dir():
-            if child.name.lower() in _LOCALE_DIR_NAMES:
-                # Check if it contains per-lang files (en.json, it.json…)
-                has_lang_files = any(
-                    f.stem.lower().replace('-', '_').split('_')[0] in _ISO_CODES
-                    and f.suffix.lower() in _DATA_EXTENSIONS
-                    for f in child.iterdir() if f.is_file()
-                )
-                if has_lang_files:
-                    per_lang_dirs.append(child)
-                    continue
+            if child.name.lower() not in _LOCALE_DIR_NAMES:
+                continue
+            if _has_lang_files(child):
+                per_lang_dirs.append(child)
+                continue
+            # e.g. i18n/locales/en.json
+            try:
+                subdirs = [s for s in child.iterdir() if s.is_dir()]
+            except OSError:
+                subdirs = []
+            for sub in subdirs:
+                if sub.name.lower() in _LOCALE_DIR_NAMES and _has_lang_files(sub):
+                    per_lang_dirs.append(sub)
+            # a single multi-language file inside the locale dir
+            for f in child.iterdir():
+                if (f.is_file() and f.suffix.lower() in _DATA_EXTENSIONS
+                        and f.stem.lower() in _SINGLE_FILE_NAMES):
+                    single_files.append(f)
 
-                # Check subdirectories (e.g. i18n/locales/)
-                for sub in child.iterdir():
-                    if sub.is_dir() and sub.name.lower() in _LOCALE_DIR_NAMES:
-                        has_sub = any(
-                            f.stem.lower().replace('-', '_').split('_')[0] in _ISO_CODES
-                            and f.suffix.lower() in _DATA_EXTENSIONS
-                            for f in sub.iterdir() if f.is_file()
-                        )
-                        if has_sub:
-                            per_lang_dirs.append(sub)
-
-                # Also check for single multilang files inside the dir
-                for f in child.iterdir():
-                    if f.is_file() and f.suffix.lower() in _DATA_EXTENSIONS:
-                        if f.stem.lower() in _SINGLE_FILE_NAMES:
-                            single_files.append(f)
-
-        # Check single multilang files at project root
         elif child.is_file() and child.suffix.lower() in _DATA_EXTENSIONS:
             if child.stem.lower() in _SINGLE_FILE_NAMES:
                 single_files.append(child)
 
-    return per_lang_dirs, single_files
+
+def _discover_locale_sources(root: Path) -> Tuple[List[Path], List[Path]]:
+    """Return (directories_with_per_lang_files, single_multilang_files).
+
+    Searched to a bounded depth, not just among the root's own children:
+    the layout that matters most in the JS world is ``src/i18n``, the
+    default in every Vite/CRA/Vue project, and a root-only scan told those
+    projects they had no dictionaries at all.
+    """
+    per_lang_dirs: List[Path] = []
+    single_files: List[Path] = []
+    for parent in _locale_search_dirs(root):
+        _scan_dir_for_locales(parent, per_lang_dirs, single_files)
+    # One directory can be reached twice (i18n/ and i18n/locales/) —
+    # de-duplicate while keeping first-seen order.
+    return (list(dict.fromkeys(per_lang_dirs)),
+            list(dict.fromkeys(single_files)))
 
 
 def _load_data_file(path: Path) -> Optional[dict]:
-    """Load JSON or YAML file into a dict."""
+    """Load a dictionary file: JSON, YAML, or a JS/TS module."""
+    suffix = path.suffix.lower()
+    if suffix in _JS_MODULE_EXTENSIONS:
+        return _load_js_module_dict(path)
     try:
         with open(path, 'r', encoding='utf-8') as f:
-            if path.suffix.lower() in {'.yml', '.yaml'} and yaml_mod:
+            if suffix in {'.yml', '.yaml'} and yaml_mod:
                 return yaml_mod.safe_load(f)
-            else:
-                return json.load(f)
+            return json.load(f)
     except Exception:
         return None
 
@@ -606,49 +1042,75 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
 
     _KEY_PATTERN = re.compile(r'^[a-z][a-z0-9]*(?:[._][a-z][a-z0-9]*)+$')
 
-    # Functions/methods whose string arguments are DISPLAYED to the user
-    _UI_FUNCS = {
-        # Qt widget constructors & setters
+    # Functions/methods whose string arguments are DISPLAYED to the user.
+    #
+    # Toolkit-shaped by necessity — "does this argument reach a screen" cannot
+    # be answered without knowing the toolkit. Several are covered rather than
+    # only the one this file grew up with, and a project adds its own through
+    # ``ui_functions`` in the project file, so a house widget library or a
+    # toolkit not listed here does not silently switch this tier off.
+    _UI_FUNCS_BUILTIN = {
+        # ── Qt (PySide / PyQt) ──
         'setText', 'setToolTip', 'setPlaceholderText', 'setWindowTitle',
         'setStatusTip', 'setWhatsThis', 'setSuffix', 'setPrefix',
         'setTitle', 'setTabText', 'setItemText', 'setLabelText',
         'showMessage',
-        # Constructors that take a visible label as first arg
         'QLabel', 'QPushButton', 'QCheckBox', 'QRadioButton',
         'QGroupBox', 'QAction', 'QMenu', 'QMessageBox',
         'addItem', 'addTab',
+        # ── tkinter ──
+        'showinfo', 'showwarning', 'showerror', 'askyesno', 'askokcancel',
+        'Label', 'Button', 'Checkbutton', 'Radiobutton', 'LabelFrame',
+        # ── GTK / PyGObject ──
+        'set_label', 'set_text', 'set_title', 'set_tooltip_text',
+        'set_markup', 'set_placeholder_text',
+        # ── wxPython ──
+        'SetLabel', 'SetToolTip', 'SetTitle', 'SetStatusText', 'MessageBox',
+        # ── Kivy / generic ──
+        'set_caption',
     }
 
-    # Functions whose direct string args are NOT UI (logging, system, etc.)
+    # Names that are never UI when called as a PLAIN FUNCTION — constructors,
+    # logging, builtins.
     _IGNORE_FUNCS = {
         # Logging / exceptions
-        'print', 'debug', 'info', 'warning', 'error', 'critical', 'exception',
-        'Exception', 'ValueError', 'RuntimeError', 'TypeError',
+        'print', 'Exception', 'ValueError', 'RuntimeError', 'TypeError',
         'FileNotFoundError', 'KeyError', 'ImportError', 'AttributeError',
         'OSError', 'IOError', 'PermissionError', 'NotImplementedError',
-        # Styling / formatting
-        'setStyleSheet', 'strftime', 'strptime', 'set_style', 'setObjectName',
-        # OS / IO
-        'getenv', 'setdefault', 'mkdir', 'write_text', 'read_text',
-        # Regex
-        'compile', 'match', 'search', 'sub', 'findall',
-        # String / collection methods
-        'connect', 'emit', 'format', 'join', 'replace', 'split',
-        'startswith', 'endswith', 'encode', 'decode', 'get', 'pop',
-        # Introspection
+        # Introspection / builtins
         'isinstance', 'hasattr', 'getattr', 'setattr', 'type',
-        # Path / file
-        'Path', 'open', 'write', 'read',
-        # Qt non-UI constructors (take technical args, not user text)
+        'getenv', 'open', 'compile',
+        # Path / non-UI constructors
+        'Path',
         'QFont', 'QColor', 'QSize', 'QPoint', 'QRect',
         'QIcon', 'QPixmap', 'QCursor', 'QBrush', 'QPen',
         'Signal', 'Slot', 'QTimer', 'QThread',
     }
 
+    # Names that are never UI when called as a METHOD (``x.name(...)``).
+    #
+    # Split from the above deliberately. One flat set was matched by bare
+    # name whatever the call looked like, so a project with a FUNCTION named
+    # get(), format() or read() had its user-facing strings silently dropped
+    # — a recall hole that leaves no trace in the report.
+    _IGNORE_METHODS = {
+        # Logging
+        'debug', 'info', 'warning', 'error', 'critical', 'exception',
+        # Styling / formatting
+        'setStyleSheet', 'strftime', 'strptime', 'set_style', 'setObjectName',
+        # OS / IO
+        'setdefault', 'mkdir', 'write_text', 'read_text', 'write', 'read',
+        # Regex
+        'match', 'search', 'sub', 'findall',
+        # String / collection plumbing
+        'connect', 'emit', 'format', 'join', 'replace', 'split',
+        'startswith', 'endswith', 'encode', 'decode', 'get', 'pop',
+    }
+
     def __init__(self):
-        self.hardcoded_strings: Set[Tuple[int, str]] = set()       # general context
-        self.ui_context_strings: Set[Tuple[int, str]] = set()      # UI widget context
-        self.func_arg_strings: Set[Tuple[int, str]] = set()        # unknown function arg context
+        self.hardcoded_strings: Set[Tuple[int, int, str]] = set()   # general context
+        self.ui_context_strings: Set[Tuple[int, int, str]] = set()  # UI widget context
+        self.func_arg_strings: Set[Tuple[int, int, str]] = set()    # unknown function arg context
         self.used_translation_keys: Set[str] = set()
         # Literal first-args of t()-family CALLS only — unlike
         # used_translation_keys this never mixes in dotted literals found
@@ -657,6 +1119,17 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
         self.t_call_keys: Set[str] = set()
         self.dynamic_key_prefixes: Set[str] = set()
         self._string_vars: Dict[str, Set[str]] = defaultdict(set)
+
+    @staticmethod
+    def _pos(node, fallback_line: int = 0) -> Tuple[int, int]:
+        """``(line, column)`` of *node*, both 1-based.
+
+        ast counts columns from 0; every compiler, linter and editor counts
+        them from 1, and a report is read next to those — so it is shifted
+        here once rather than everywhere it is printed.
+        """
+        return (getattr(node, 'lineno', fallback_line) or fallback_line,
+                getattr(node, 'col_offset', 0) + 1)
 
     def _remove_docstring(self, node):
         if ast.get_docstring(node) and hasattr(node, 'body') and node.body:
@@ -714,8 +1187,10 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
                     elif isinstance(br, ast.JoinedStr):
                         self._extract_dynamic_prefix(br)
 
+        is_method = isinstance(node.func, ast.Attribute)
+
         # ── UI-context string collection ──
-        if func_name in self._UI_FUNCS:
+        if func_name in _ui_funcs():
             for arg in node.args:
                 self._collect_ui_strings(arg, node.lineno)
             for kw in node.keywords:
@@ -726,8 +1201,10 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
             self._visit_calls_only(node)
             return
 
-        # ── Ignored functions (logging, system) ──
-        if func_name in self._IGNORE_FUNCS:
+        # ── Ignored calls (logging, system) — matched by CALL SHAPE ──
+        ignored = (func_name in self._IGNORE_METHODS if is_method
+                   else func_name in self._IGNORE_FUNCS)
+        if ignored:
             self._visit_calls_only(node)
             return
 
@@ -735,14 +1212,14 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
         if func_name and func_name not in TRANSLATION_FUNCTIONS:
             for arg in node.args:
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                    self.func_arg_strings.add((getattr(arg, 'lineno', node.lineno), arg.value))
+                    self.func_arg_strings.add((*self._pos(arg, node.lineno), arg.value))
 
         self.generic_visit(node)
 
     def _collect_ui_strings(self, node, fallback_line: int):
         """Extract string values from an AST node in a UI context."""
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            self.ui_context_strings.add((getattr(node, 'lineno', fallback_line), node.value))
+            self.ui_context_strings.add((*self._pos(node, fallback_line), node.value))
         elif isinstance(node, ast.JoinedStr):
             # Extract static fragments from f-strings in UI context
             for val in node.values:
@@ -752,9 +1229,9 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
                     visible = re.sub(r'<[^>]+>', ' ', raw).strip()
                     visible = re.sub(r'\s+', ' ', visible).strip()
                     if raw.strip():
-                        self.ui_context_strings.add((getattr(node, 'lineno', fallback_line), raw.strip()))
+                        self.ui_context_strings.add((*self._pos(val, fallback_line), raw.strip()))
                     if visible and visible != raw.strip():
-                        self.ui_context_strings.add((getattr(node, 'lineno', fallback_line), visible))
+                        self.ui_context_strings.add((*self._pos(val, fallback_line), visible))
             self._extract_dynamic_prefix(node)
         elif isinstance(node, ast.Call):
             # Nested call like QLabel(t(...)) — process the call
@@ -764,7 +1241,7 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
         """Walk child nodes looking ONLY for translation and UI function calls.
         Does NOT process other calls — prevents false collection of strings
         inside nested non-UI calls like .get(), .format(), etc."""
-        _PROPAGATE = TRANSLATION_FUNCTIONS | self._UI_FUNCS
+        _PROPAGATE = TRANSLATION_FUNCTIONS | _ui_funcs()
         for child in ast.walk(node):
             if isinstance(child, ast.Call) and child is not node:
                 func_name = ""
@@ -789,7 +1266,7 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
     def visit_Constant(self, node):
         if isinstance(node.value, str):
             val = node.value
-            self.hardcoded_strings.add((node.lineno, val))
+            self.hardcoded_strings.add((*self._pos(node), val))
             if self._KEY_PATTERN.match(val):
                 self.used_translation_keys.add(val)
         self.generic_visit(node)
@@ -797,7 +1274,7 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
     def visit_JoinedStr(self, node):
         for val in node.values:
             if isinstance(val, ast.Constant) and isinstance(val.value, str):
-                self.hardcoded_strings.add((node.lineno, val.value))
+                self.hardcoded_strings.add((*self._pos(val, node.lineno), val.value))
         self.generic_visit(node)
 
 
@@ -849,6 +1326,7 @@ class UniversalQualityAnalyzer:
         self.test_mixed_languages()
         self.test_orphan_keys()
         self.test_json_real_duplicates()
+        self.test_severity_budgets()
 
         self.generate_report()
 
@@ -1182,19 +1660,25 @@ class UniversalQualityAnalyzer:
                     # Non-Python source: regex key extraction only —
                     # minified bundles are skipped (regex soup, no keys
                     # a human wrote).
-                    if '.min.' in fname.lower():
-                        continue
                     try:
                         _src = fpath.read_text(encoding='utf-8', errors='replace')
+                    except Exception:
+                        continue
+                    if '.min.' in fname.lower() or _looks_generated(_src):
+                        continue
+                    try:
                         _keys, _prefixes = _extract_keys_regex(_src)
                         self.all_used_code_keys.update(_keys)
                         self.all_t_call_keys.update(_keys)
                         self.all_dynamic_prefixes.update(_prefixes)
                         _rel = str(fpath.relative_to(PROJECT_ROOT))
-                        for _lineno, _text in _extract_hardcoded_regex(_src, ext):
+                        _other_lines = _src.splitlines()
+                        for _lineno, _col, _text in _extract_hardcoded_regex(_src, ext):
                             self.results['hardcoded'].append({
-                                'file': _rel, 'line': _lineno, 'text': _text,
-                                'context': 'regex_ui'})
+                                'file': _rel, 'line': _lineno, 'col': _col,
+                                'text': _text, 'context': 'regex_ui',
+                                'severity': _severity_for('regex_ui'),
+                                'preview': _preview(_other_lines, _lineno)})
                         n_other += 1
                     except Exception:
                         pass
@@ -1224,7 +1708,7 @@ class UniversalQualityAnalyzer:
 
                     # Tier 1: UI-context strings — args to known UI widget functions
                     seen = set()
-                    for lineno, text in ana.ui_context_strings:
+                    for lineno, col, text in ana.ui_context_strings:
                         if _suppressed(lineno):
                             continue
                         if self._is_ui_context_string(text):
@@ -1232,30 +1716,67 @@ class UniversalQualityAnalyzer:
                             if key not in seen:
                                 seen.add(key)
                                 self.results['hardcoded'].append({
-                                    'file': str(rel), 'line': lineno, 'text': text, 'context': 'ui'})
+                                    'file': str(rel), 'line': lineno, 'col': col,
+                                    'text': text, 'context': 'ui',
+                                    'severity': _severity_for('ui'),
+                                    'preview': _preview(src_lines, lineno)})
 
                     # Tier 2: Function-arg strings — ALL-CAPS labels passed to unknown functions
-                    for lineno, text in ana.func_arg_strings:
+                    for lineno, col, text in ana.func_arg_strings:
                         if _suppressed(lineno):
                             continue
                         key = (str(rel), lineno, text)
                         if key not in seen and self._is_func_arg_label(text):
                             seen.add(key)
                             self.results['hardcoded'].append({
-                                'file': str(rel), 'line': lineno, 'text': text, 'context': 'func_arg'})
+                                'file': str(rel), 'line': lineno, 'col': col,
+                                'text': text, 'context': 'func_arg',
+                                'severity': _severity_for('func_arg'),
+                                'preview': _preview(src_lines, lineno)})
 
                     # Tier 3: General strings (strict filter)
-                    for lineno, text in ana.hardcoded_strings:
+                    for lineno, col, text in ana.hardcoded_strings:
                         if _suppressed(lineno):
                             continue
                         key = (str(rel), lineno, text)
                         if key not in seen and self._is_ui_string(text):
                             seen.add(key)
                             self.results['hardcoded'].append({
-                                'file': str(rel), 'line': lineno, 'text': text, 'context': 'general'})
+                                'file': str(rel), 'line': lineno, 'col': col,
+                                'text': text, 'context': 'general',
+                                'severity': _severity_for('general'),
+                                'preview': _preview(src_lines, lineno)})
                 except Exception:
                     pass
         print(L("scan_summary", py=n_py, other=n_other))
+
+    def severity_counts(self) -> Dict[str, int]:
+        counts = {level: 0 for level in SEVERITY_ORDER}
+        for it in self.results['hardcoded']:
+            counts[it.get('severity') or _severity_for(it.get('context', ''))] += 1
+        return counts
+
+    def test_severity_budgets(self):
+        """Compare the findings against the ceilings the project set.
+
+        No budgets declared → purely informational, exactly as before: a
+        tool that started failing builds the day it was upgraded would just
+        get switched off. A project that DOES declare one gets a ratchet it
+        cannot quietly slip past, which is the only way a count of hundreds
+        ever comes down.
+        """
+        print("\n" + L("an_severity"))
+        counts = self.severity_counts()
+        budgets = _project_budgets()
+        for level in SEVERITY_ORDER:
+            budget = budgets.get(level)
+            suffix = "" if budget is None else f"  (max {budget})"
+            print(L("sev_count", level=level, n=counts[level]) + suffix)
+            if budget is not None and counts[level] > budget:
+                self.failures.append(
+                    L("fail_budget", level=level, n=counts[level], max=budget))
+        if not budgets:
+            print(L("sev_no_budget", file=PROJECT_VOCAB_FILE))
 
     def test_missing_keys_global(self):
         print("\n" + L("an_missing"))
@@ -1403,11 +1924,13 @@ class UniversalQualityAnalyzer:
         # shredding them into words feeds langdetect pure noise.
         clean = re.sub(r'\b[\w-]+(?:\.[\w-]+)+(?:/\S*)?', ' ', clean)
 
+        neutral_words = _tech_words()   # built-ins + this project's own
+
         def _paren(m):
             toks = re.findall(r'[\w.]+', m.group(1))
             neutral = all(
                 t0[:1].isupper() or any(c.isdigit() for c in t0)
-                or '.' in t0 or t0.lower() in _TECH_WORDS
+                or '.' in t0 or t0.lower() in neutral_words
                 for t0 in toks) if toks else True
             return ' ' if neutral else ' ' + m.group(1) + ' '
 
@@ -1422,7 +1945,7 @@ class UniversalQualityAnalyzer:
             if i > 0 and w[:1].isupper():
                 continue                    # mid-sentence TitleCase = proper noun
             lw = w.lower()
-            if lw in _TECH_WORDS or len(lw) == 1:
+            if lw in neutral_words or len(lw) == 1:
                 continue
             out.append(lw)
         return out
@@ -1472,8 +1995,19 @@ class UniversalQualityAnalyzer:
                 top = probs[0] if probs else None
                 strong_detect = False
                 if top is not None and top.lang != expected:
-                    if top.lang in _LANGDETECT_NOISE:
-                        strong_detect = top.prob >= 0.99 and len(words) >= 8
+                    # A length floor for the langdetect-only route, not just
+                    # for the noisy languages. A short string made entirely
+                    # of content words carries no function-word evidence
+                    # either way, and langdetect answers confidently anyway:
+                    # "Total includes promos/discounts/service cost." came
+                    # back as Spanish at 1.00, "Promo professional price
+                    # (total lot)" as Italian at 1.00. Both are English.
+                    # The deterministic stopword route below is untouched —
+                    # it stays as sensitive as it was on any length.
+                    if len(words) < _DETECT_MIN_WORDS:
+                        strong_detect = False
+                    elif top.lang in _LANGDETECT_NOISE:
+                        strong_detect = top.prob >= 0.99
                     else:
                         strong_detect = top.prob >= 0.97
                 if not (strong_cross or (strong_detect and hits_exp == 0)):
@@ -1510,7 +2044,18 @@ class UniversalQualityAnalyzer:
                 (L("cat_unresolved"), self.results['unresolved_code_keys'], L("sev_crit")),
                 (L("cat_empty"), self.results['empty_values'], L("sev_high")),
                 (L("cat_missing"), self.results['missing_keys'], L("sev_high")),
-                (L("cat_hardcoded"), self.results['hardcoded'], L("sev_med")),
+                (L("cat_hardcoded") + " — high",
+                 [i for i in self.results['hardcoded']
+                  if (i.get('severity') or _severity_for(i.get('context', ''))) == 'high'],
+                 L("sev_high")),
+                (L("cat_hardcoded") + " — medium",
+                 [i for i in self.results['hardcoded']
+                  if (i.get('severity') or _severity_for(i.get('context', ''))) == 'medium'],
+                 L("sev_med")),
+                (L("cat_hardcoded") + " — low",
+                 [i for i in self.results['hardcoded']
+                  if (i.get('severity') or _severity_for(i.get('context', ''))) == 'low'],
+                 L("sev_low")),
                 (L("cat_orphans"), self.results['orphan_keys'], L("sev_med")),
                 (L("cat_mixed"), self.results['mixed_langs'], L("sev_low")),
             ]
@@ -1546,9 +2091,19 @@ class UniversalQualityAnalyzer:
                     for fp, fitems in sorted(g.items()):
                         f.write(f"### 📁 `{fp}`\n")
                         rp = f"../{fp.replace(chr(92), '/')}"
-                        for it in sorted(fitems, key=lambda x: x['line']):
+                        # line THEN column: two findings on one line read in
+                        # the order they appear in it.
+                        for it in sorted(fitems,
+                                         key=lambda x: (x['line'], x.get('col', 0))):
                             st = str(it['text']).replace('`', "'").replace('\n', '\\n')
-                            f.write(L("r_line", line=it['line'], rp=rp, text=st))
+                            f.write(L("r_line", line=it['line'],
+                                      col=it.get('col', 1), rp=rp, text=st))
+                            prev = it.get('preview')
+                            # Only when it adds something: for a bare string
+                            # literal on its own line the preview IS the
+                            # finding, and repeating it is noise.
+                            if prev and prev.strip("'\" ") != st.strip("'\" "):
+                                f.write(L("r_preview", preview=prev))
                         f.write("\n")
 
             if self.results['missing_keys']:
@@ -1607,6 +2162,316 @@ class UniversalQualityAnalyzer:
         print(L("done", path=rpath.absolute()))
 
 
+
+
+# ==========================================
+# 🧪 SELF-TEST
+# ==========================================
+# The tool checks the project; until now nothing checked the tool. Its
+# heuristics are hand-curated lists, and a mistake in one is invisible on the
+# codebase it was written against — which is exactly how a vocabulary full of
+# ONE project's brand names shipped as "universal" and went unnoticed.
+#
+# So: a synthetic project with planted problems and planted non-problems, and
+# an assertion for each. Every case below guards a specific behaviour, and a
+# failure names which one broke.
+
+_SELF_TEST_FILES = {
+    "locales/en.json": """{
+  "app": {"title": "Settings", "save": "Save"},
+  "dead": {"unused": "Nobody references this"}
+}""",
+    "locales/it.json": """{
+  "app": {"title": "Impostazioni", "save": "Salva"},
+  "dead": {"unused": "Nessuno la usa"},
+  "leftover": {"english": "The backup could not be created because the disk is full"},
+  "brandy": {"ok": "Sincronizzazione con Acmecloud e Widgetdrive completata senza errori"}
+}""",
+    ".i18n-quality.json": """{
+  "tech_words": ["acmecloud", "widgetdrive"],
+  "ui_functions": ["HouseLabel"]
+}""",
+    "app.py": '''
+from i18n import t
+
+def build(ui):
+    ui.setText(t("app.title"))
+    ui.setToolTip("Save your progress now")          # planted: UI hardcoded
+    ui.setText(t("app.nonexistent"))                 # planted: unresolved key
+    ui.setText("Internal debug marker")              # i18n-ignore
+    cfg = {}
+    cfg.get("Config lookup value")                   # method ignore: not a finding
+    HouseLabel("Custom widget text")                 # project ui_functions -> high
+''',
+    # Non-Python sources: the regex tier had no coverage here at all, which
+    # is how a text node indented under its tag kept being reported on the
+    # tag's line, with a column measured against a different one.
+    "web/a.js": """
+const title = t('app.title');
+const miss  = t('js.absent.key');
+el.setAttribute("placeholder", "Type your name here");
+""",
+    "web/b.vue": """<template>
+  <div>
+    Indented text node here
+  </div>
+</template>
+<script>
+export default { mounted() { this.$t('vue.absent.key'); } }
+</script>
+""",
+    "web/c.php": "<?php echo __('php.absent.key'); ?>",
+    "helpers.py": '''
+def get(label):                                      # a FUNCTION named get
+    return label
+
+def build():
+    return get("Plain function argument text")       # planted: not suppressed
+''',
+}
+
+# (case id, description, predicate over the finished analyzer)
+_SELF_TEST_CASES = [
+    ("ui_hardcoded",
+     "a string passed to a UI setter is found at high severity",
+     lambda a: any(i['text'] == "Save your progress now" and i['severity'] == 'high'
+                   for i in a.results['hardcoded'])),
+    ("project_ui_function",
+     "a widget named in the project's ui_functions counts as UI",
+     lambda a: any(i['text'] == "Custom widget text" and i['severity'] == 'high'
+                   for i in a.results['hardcoded'])),
+    ("unresolved_key",
+     "t() on a key absent from every locale is blocking",
+     lambda a: "app.nonexistent" in a.results['unresolved_code_keys']),
+    ("orphan_key",
+     "a locale key nothing references is reported orphan",
+     lambda a: "dead.unused" in a.results['orphan_keys']),
+    ("ignore_comment",
+     "# i18n-ignore silences the line it sits on",
+     lambda a: not any(i['text'] == "Internal debug marker"
+                       for i in a.results['hardcoded'])),
+    ("method_ignored",
+     "a string argument to .get() is not a finding",
+     lambda a: not any(i['text'] == "Config lookup value"
+                       for i in a.results['hardcoded'])),
+    ("function_not_ignored",
+     "a string argument to a FUNCTION named get() still is",
+     lambda a: any(i['text'] == "Plain function argument text"
+                   for i in a.results['hardcoded'])),
+    ("mixed_language",
+     "an English sentence in the Italian file is flagged",
+     lambda a: any(r['key'] == "leftover.english" for r in a.results['mixed_langs'])),
+    # Asserted on the vocabulary itself, not through the pipeline. The
+    # pipeline route looked fine and proved nothing: the fixture sentence
+    # carried Italian function words, so the check short-circuited before the
+    # vocabulary was ever consulted and the case passed with the project file
+    # disabled. A test that passes while the thing it names is broken is
+    # worse than no test.
+    ("vocab_loaded",
+     "the project's own tech_words reach the neutral vocabulary",
+     lambda a: {"acmecloud", "widgetdrive"} <= a.probe["tech_words"]),
+    ("config_error_survivable",
+     "a malformed configuration warns instead of crashing the run",
+     lambda a: isinstance(a.probe["budgets"], dict)),
+    ("config_bom_tolerated",
+     "a configuration file saved with a BOM is still read",
+     lambda a: "acmecloud" in a.probe["tech_words"]),
+    ("vocab_builtin_kept",
+     "the built-in vocabulary survives alongside the project's",
+     lambda a: {"json", "windows", "dropbox"} <= a.probe["tech_words"]),
+    ("brand_sentence_clean",
+     "a translated sentence naming brands is not flagged wrong-language",
+     lambda a: not any(r['key'] == "brandy.ok" for r in a.results['mixed_langs'])),
+    ("regex_keys_js",
+     "t() keys are extracted from JavaScript",
+     lambda a: "js.absent.key" in a.results['unresolved_code_keys']),
+    ("regex_keys_vue",
+     "$t() keys are extracted from a Vue single-file component",
+     lambda a: "vue.absent.key" in a.results['unresolved_code_keys']),
+    ("regex_keys_php",
+     "__() keys are extracted from PHP",
+     lambda a: "php.absent.key" in a.results['unresolved_code_keys']),
+    ("regex_setattr",
+     "setAttribute('placeholder', text) is caught in plain JS",
+     lambda a: any(i['text'] == "Type your name here"
+                   for i in a.results['hardcoded'])),
+    ("regex_textnode_position",
+     "an indented text node reports ITS OWN line and column",
+     lambda a: any(i['text'] == "Indented text node here"
+                   and i['preview'].strip() == "Indented text node here"
+                   and i['col'] >= 1
+                   for i in a.results['hardcoded'])),
+    ("column_recorded",
+     "every finding carries a 1-based column",
+     lambda a: all(i.get('col', 0) >= 1 for i in a.results['hardcoded'])),
+    ("preview_recorded",
+     "every finding carries the source line it sits on",
+     lambda a: all(i.get('preview') for i in a.results['hardcoded'])),
+]
+
+
+# ── Second scenario: the JavaScript layout ─────────────────────────────────
+# A different world from the JSON one above: dictionaries living in a module
+# under src/, no Python at all. Both the module parser and the nested
+# discovery were added after a real project reported "no i18n dictionaries
+# found" while its src/i18n/translations.js sat right there.
+_SELF_TEST_FILES_JS = {
+    "src/i18n/translations.js": """
+export const translations = {
+  it: {
+    save: "Salva",
+    // un commento fra le chiavi
+    onlyItalian: "Presente solo in italiano",
+  },
+  en: {
+    save: "Save",
+    leftInItalian: "Il totale include promo e sconti applicati al carrello",
+    shortEnglish: "Promo professional price (total lot)",
+  },
+};
+""",
+    "src/App.jsx": """
+export default function App() {
+  return (
+    <div>
+      <span>Hardcoded label here</span>
+      {items.length > 0 && depth < maxDepth ? <A /> : <B />}
+      <button title={t('save')}>{t('save')}</button>
+    </div>
+  );
+}
+""",
+    "dist/assets/index-a1b2c3.js": (
+        'const a=1;' + 'const bundled="Minified label text";' * 60 + '\n'),
+}
+
+_SELF_TEST_CASES_JS = [
+    ("js_module_parsed",
+     "a JS translations module is read as a dictionary",
+     lambda a: set(a.flat_locales) == {"it", "en"}),
+    ("js_nested_discovery",
+     "dictionaries under src/i18n are found, not just at the root",
+     lambda a: any("i18n" in str(p) for p in a.locale_source_files)),
+    ("js_missing_key",
+     "a key present in one language and absent in the other is reported",
+     lambda a: any(r['missing_key'] == "onlyItalian"
+                   for r in a.results['missing_keys'])),
+    ("js_hardcoded_found",
+     "hardcoded JSX text is still reported",
+     lambda a: any(i['text'] == "Hardcoded label here"
+                   for i in a.results['hardcoded'])),
+    ("js_code_shape_rejected",
+     "a JSX comparison is not mistaken for a text node",
+     lambda a: not any('&&' in i['text'] or i['text'].strip().startswith(')')
+                       for i in a.results['hardcoded'])),
+    ("js_generated_skipped",
+     "a bundled asset is skipped whatever it is named",
+     lambda a: not any('Minified label text' in i['text']
+                       for i in a.results['hardcoded'])),
+    ("js_untranslated_flagged",
+     "a long Italian sentence left in the English file is flagged",
+     lambda a: any(r['key'] == "leftInItalian" for r in a.results['mixed_langs'])),
+    ("js_short_string_spared",
+     "a short English string of content words is NOT flagged",
+     lambda a: not any(r['key'] == "shortEnglish"
+                       for r in a.results['mixed_langs'])),
+]
+
+
+def _analyse_fixture(files: dict):
+    """Write *files* to a temp project, analyse it, return the analyzer."""
+    import codecs
+    import contextlib
+    import io
+    import tempfile
+    global PROJECT_ROOT, _project_config_cache
+
+    with tempfile.TemporaryDirectory(prefix="i18nqa_selftest_") as td:
+        root = Path(td)
+        for rel, body in files.items():
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            text = body
+            if rel == ".i18n-quality.json":
+                # Written WITH a byte-order mark on purpose: Notepad and
+                # Windows PowerShell add one by default, and it used to make
+                # the whole file unreadable without a word of complaint.
+                path.write_bytes(codecs.BOM_UTF8 + text.encode("utf-8"))
+                continue
+            if rel == "app.py":
+                text = text.replace(
+                    'ui.setText("Internal debug marker")',
+                    'ui.setText("Internal debug marker")  # i18n-ignore')
+            path.write_text(text, encoding="utf-8")
+
+        saved_root, saved_cfg = PROJECT_ROOT, _project_config_cache
+        PROJECT_ROOT, _project_config_cache = root, None
+        analyzer = UniversalQualityAnalyzer(report_path=root / "report.md")
+        try:
+            # The synthetic project is SUPPOSED to fail: run_all_tests exits
+            # non-zero when it finds blocking problems, and finding them is
+            # the point. Its console output is swallowed too — what matters
+            # here is the case table below, not another copy of the run.
+            with contextlib.redirect_stdout(io.StringIO()):
+                try:
+                    analyzer.run_all_tests()
+                except SystemExit:
+                    pass
+            # Snapshot what the config-driven helpers RESOLVED TO while the
+            # synthetic root was active. Reading them from a predicate would
+            # read the real project again — the globals are restored below.
+            analyzer.probe = {
+                "tech_words": _tech_words(),
+                "ui_funcs": _ui_funcs(),
+                "budgets": _project_budgets(),
+            }
+        finally:
+            PROJECT_ROOT, _project_config_cache = saved_root, saved_cfg
+    return analyzer
+
+
+def _check_cases(analyzer, cases, failed: list) -> None:
+    for case_id, description, predicate in cases:
+        try:
+            ok = bool(predicate(analyzer))
+        except Exception as exc:                       # a broken case is a failure
+            ok = False
+            description = f"{description} - {exc!r}"
+        print(f"  [{'OK  ' if ok else 'FAIL'}] {case_id:26} {description}")
+        if not ok:
+            failed.append(case_id)
+
+
+def _run_self_test() -> int:
+    """Analyse each synthetic project and assert every case. Exit code.
+
+    Two scenarios, because one layout only ever proves itself: a
+    JSON/Python project, and a JavaScript one whose dictionaries live in a
+    module under src/. The second exists because a real project reported
+    "no i18n dictionaries found" while its src/i18n/translations.js sat
+    right there.
+    """
+    scenarios = [
+        ("json + python", _SELF_TEST_FILES, _SELF_TEST_CASES),
+        ("js module", _SELF_TEST_FILES_JS, _SELF_TEST_CASES_JS),
+    ]
+    print(chr(10) + "=" * 80)
+    print(L("st_header"))
+    failed: List[str] = []
+    total = 0
+    for scenario, files, cases in scenarios:
+        analyzer = _analyse_fixture(files)
+        print("  -- " + scenario)
+        total += len(cases)
+        _check_cases(analyzer, cases, failed)
+    print("=" * 80)
+    if failed:
+        print(L("st_failed", n=len(failed), ids=", ".join(failed)))
+        return 1
+    print(L("st_passed", n=total))
+    return 0
+
+
 if __name__ == '__main__':
     import argparse
     _ap = argparse.ArgumentParser(
@@ -1616,6 +2481,14 @@ if __name__ == '__main__':
     _ap.add_argument("--report", type=Path, default=None,
                      help="output path for the Markdown report "
                           "(default: tests/UNIVERSAL_QUALITY_REPORT.md)")
+    _ap.add_argument("--self-test", action="store_true",
+                     help="analyse a synthetic project with planted problems "
+                          "and assert every check still catches them, then "
+                          "exit (nonzero on failure)")
+    _ap.add_argument("--vocab-help", action="store_true",
+                     help=f"explain {PROJECT_VOCAB_FILE}, the optional file in "
+                          "the project root that adds brand/product names to "
+                          "the language-neutral vocabulary, then exit")
     _ap.add_argument("--lang", choices=TOOL_LANGS, default=None,
                      help="tool output language (default: auto-detected "
                           "from the system locale; extend by dropping a "
@@ -1624,6 +2497,22 @@ if __name__ == '__main__':
                      help="write qa_lang_<CODE>.json with every message in "
                           "English as a translation starting point, then exit")
     _args = _ap.parse_args()
+    if _args.lang:
+        TOOL_LANG = _args.lang
+    if _args.self_test:
+        raise SystemExit(_run_self_test())
+    if _args.vocab_help:
+        print(
+            f"{PROJECT_VOCAB_FILE} — optional, in the scanned project root "
+            f"(or --root).\n\n"
+            "The mixed-language check reports strings that look like they were "
+            "left in\nthe wrong language. Brand, vendor, engine and site names "
+            "are spelled the\nsame in every locale, so they must not count as "
+            "evidence. This tool ships\nonly cross-project vocabulary (api, "
+            "json, url, token, …); a project declares\nits own here:\n\n"
+            '  { "tech_words": ["acme", "postgres", "unreal", "steam"] }\n\n'
+            "Absent or malformed: ignored silently, built-ins only.")
+        raise SystemExit(0)
     if _args.export_lang_template:
         _code = _args.export_lang_template.strip().lower()
         _out = Path(__file__).parent / f"qa_lang_{_code}.json"
@@ -1636,6 +2525,4 @@ if __name__ == '__main__':
         raise SystemExit(0)
     if _args.root:
         PROJECT_ROOT = _args.root.resolve()
-    if _args.lang:
-        TOOL_LANG = _args.lang
     UniversalQualityAnalyzer(report_path=_args.report).run_all_tests()
