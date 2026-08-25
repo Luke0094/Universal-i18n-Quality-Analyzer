@@ -72,17 +72,15 @@ listing all blocking findings — one early failure never hides the rest.
 ## How it reads your code
 
 Python is read with the standard library's `ast`. Every other language is
-read with **tree-sitter** when its grammar is available (300+ of them:
-JS, TS, JSX/TSX, Vue, Svelte, PHP, Kotlin, Java, C#, Go, Rust, Ruby, Dart,
-QML…), and with a regex when it is not.
+read with **tree-sitter** when its grammar is available, and with a regex
+when it is not. Thirty-six file extensions are supported today: JS, TS,
+JSX/TSX, Vue, Svelte, Astro, PHP, Kotlin, Java, C#, Go, Rust, Ruby, Dart,
+QML, Lua, Swift, Objective-C, C, C++, Elixir, Scala, Groovy, Perl and Haxe.
 
-The parse tree does not *replace* the regex, it **corrects** it, and that
-distinction was measured rather than assumed. A straight swap was written
-first and lost real keys: the Vue grammar keeps a `<script>` body as raw
-text without a language injection, and PHP returned no call nodes for the
-shapes in the fixture. Losing a key is the worse failure — it turns a live
-key into a false orphan and hides a real unresolved-key finding — so the
-rule is:
+The parse tree does not *replace* the regex, it **corrects** it. A straight
+swap was written first and lost real keys, and losing a key is the worse
+failure — it turns a live key into a false orphan and hides a real
+unresolved-key finding. So the rule is:
 
 > keys = (regex hits the tree cannot disprove) + (calls the tree found)
 
@@ -91,6 +89,22 @@ or the comment containing it. So `t('x')` written inside a string, or in a
 mid-line `// t('old.key')` the regex's whole-line comment stripping never
 saw, stops counting as usage — while everything tree-sitter cannot parse
 keeps the regex result untouched.
+
+A parse that reports **error nodes** counts as "cannot parse" for the
+purpose of dropping: whatever the tree found is still added, but its idea
+of where a string ends is no longer believed. That matters where one
+extension has several languages behind it (`.h`, `.m`) and the grammar
+picked may simply be the wrong one.
+
+Two shapes need more than a grammar. **Single-file components** —
+`.vue`, `.svelte`, `.astro` — keep their script body as raw text, so each
+block is handed to the language it declares (`lang="ts"` included) and the
+byte offsets are shifted back into the file's own coordinates. And a call's
+key is **not always its first argument**: `pgettext(context, key)` puts it
+second, `ngettext(singular, plural, n)` has one in each of the first two,
+and the `d*` family leads with a domain. Reading slot 0 regardless does not
+merely miss a key — it files a context or a domain string as one, which
+then masks a real orphan.
 
 Which backend read your sources is printed with the scan summary, so the
 answer is never a guess.
@@ -108,11 +122,15 @@ Hardcoded-string detection distinguishes strings passed to Qt widget
 setters/constructors (`setText`, `QLabel`, …) from generic literals, with
 per-tier filtering to keep the noise down.
 
-**Other languages** are read for the same two things:
+**Other languages** are read for the same things:
 
-- calls — `t('key')`, `$t('key')`, `i18n.t("key")`, `__('key')`, `tr(...)`…
+- calls — `t('key')`, `$t('key')`, `i18n.t("key")`, `__('key')`, `tr(...)`,
+  `qsTr(...)`, `NSLocalizedString(...)`, the gettext family…
+- factory calls — `useTranslations()('nav.home')`, where the key goes to
+  what the call *returns*
 - template-literal prefixes — `` t(`nav.${page}`) `` keeps the `nav.*`
   family alive for the orphan analysis
+- hardcoded UI text, from the parse tree — see below
 
 That covers the cross-language checks (**unresolved keys** and
 **orphans**) on any codebase. Minified bundles (`*.min.js`) and generated
@@ -136,26 +154,45 @@ read them.
 
 | Tier | Languages | Method | Key extraction | Hardcoded detection | Notes |
 |------|-----------|--------|:---:|:---:|-------|
-| **Full** | Python | `ast` (stdlib) | ~99% | ✅ | Literals, f-string prefixes, variables, concatenation, ternaries; severity-graded hardcoded detection with `line:column` and source preview |
-| **High** | JS, TS, JSX/TSX, Vue, Svelte, PHP | tree-sitter → regex | ~90% | ⚠️ hints | Dotted-key `t()`-style calls are the ecosystem norm (`i18next`, `vue-i18n`, Laravel `__()`); misses keys held in variables or built by concatenation |
-| **Conditional** | Dart, Kotlin, Java, C#, Ruby, Go, Rust | tree-sitter → regex | ~60–75% | ❌ | Captured **only if** the project uses a dotted-key `t()`-style API; ecosystem-native resource systems (Android `R.string`, .NET `.resx`, Flutter ARB codegen) are not parsed |
-| **Low** | QML | tree-sitter → regex | ~40% | ❌ | `qsTr("English text")` is text-based, not key-based — only key-style helper calls are caught |
+| **Full** | Python | `ast` (stdlib) | ~99% | ✅ | Literals, f-string prefixes, variables, concatenation, ternaries, keys passed by keyword; severity-graded hardcoded detection with `line:column` and source preview |
+| **High** | JS, TS, JSX/TSX, Vue, Svelte, Astro, PHP | tree-sitter → regex | ~90% | ✅ parsed | Dotted-key `t()`-style calls are the ecosystem norm (`i18next`, `vue-i18n`, Laravel `__()`); factory calls (`useTranslations()('k')`) are read too. Misses keys held in variables or built by concatenation |
+| **Conditional** | Dart, Kotlin, Java, C#, Ruby, Go, Rust, Lua, Scala, Groovy, Perl, Haxe | tree-sitter → regex | ~60–75% | ✅ parsed | Captured **only if** the project uses a dotted-key `t()`-style API; ecosystem-native resource systems (Android `R.string`, .NET `.resx`, Flutter ARB codegen) are not parsed |
+| **Low** | QML, Swift, Objective-C, C, C++, Elixir | tree-sitter → regex | ~40% | ✅ parsed | The idiomatic call carries the **source text**, not a key: `qsTr("English text")`, `NSLocalizedString("Save", …)`, gettext's `_("Save")`. The calls are recognised and their argument read; only a project that puts key-shaped strings in them gets usable output |
 
 Grammars are present for every extension in the table, so "→ regex" is
 the fallback for a machine where tree-sitter is not installed, not for a
 language it cannot handle.
 
-**What the parse tree does and does not change.** It does not raise the
-percentages above, and the reason is structural: the tree *corrects* the
-regex rather than replacing it, so the set of keys found is the union of
-both and recall can only be ≥ the regex's own. What improves is
-**precision** — a `t('x')` written inside a string literal, or inside a
+The **Hardcoded detection** column is about the strings a project forgot
+to translate, and is a separate question from key extraction: it depends
+on the syntax being readable, not on the i18n API being key-shaped. That
+is why a language can sit in the Low tier for keys and still be ✅ here.
+
+**Precision is measured; recall is estimated.** These are different
+quantities and the table above is the second one. The first has a number:
+all **36 supported extensions** reject a translation call written inside
+a string literal *and* one written inside a comment — the two things a
+regex cannot tell from a real call. Each was checked with a decoy of each
+kind, and a language that kept a decoy was fixed rather than listed. That
+says nothing about how many of a codebase's keys are shaped the way the
+extractor can see, which is what the percentages are about.
+
+**What the parse tree does and does not change.** It mostly does not
+raise the percentages above, and the reason is structural: the tree
+*corrects* the regex rather than replacing it, so the set of keys found is
+the union of both and recall can only be ≥ the regex's own. What improves
+is **precision** — a `t('x')` written inside a string literal, or inside a
 mid-line `// t('old.key')` that whole-line comment stripping never saw,
 stops counting as a usage. Both used to inflate the "used keys" set,
 which hides real orphans and can raise a blocking unresolved-key finding
 for a key nobody actually calls. Dynamic prefixes are read from the tree
 too, so `` gettext(`menu.${x}`) `` yields its family even though the
 prefix regex only knows the shorter list of function names.
+
+Recall does move where a call shape was invisible to *both* backends:
+Qt's `qsTr` (without which a `.qml` file came back empty, which reads as
+"no keys here"), Objective-C's `@"…"` prefix before the opening quote,
+and the second and third arguments of the gettext family.
 
 On a project with no such cases nothing moves at all: a real-world
 JS/JSX codebase measured here reported identical findings with the tree
@@ -167,28 +204,43 @@ see. When a tier's assumptions don't hold for your project, the
 locale-vs-locale checks (1, 2, 4, 5, 8) still apply in full — only the
 code-aware checks (3, 7) degrade.
 
-**Hardcoded strings outside Python — hints only, still.** A bare string
-in JS/TS says nothing about itself: it could be UI text, a CSS selector,
-an object key or a log message. Python's AST supplies the call context
-(`setText(...)` → user-visible) that makes the check reliable.
+**Hardcoded strings outside Python are read from the tree too.** A bare
+string in JS says nothing about itself: it could be UI text, a CSS
+selector, an object key or an import path. The tree knows which it is, and
+that is now what the check asks:
 
-tree-sitter could now supply that same context for the languages above,
-and deliberately does not yet. This tier feeds the severity budgets, and
-budgets are a ratchet: rewiring it would move the numbers of every
-project already pinned to a ceiling, with no way to tell a real
-regression from a backend difference. It is the obvious next step, and
-it wants its own before/after gate rather than a free ride on this one.
+- **text nodes** — the words between the tags, with a sentence broken by
+  an interpolation reported whole (`Total for {…} nights`) rather than as
+  the pieces either side of the hole, and an HTML entity counted as part
+  of the label it sits in (`Succ &gt;` is `Succ >`, not the single word
+  `Succ` that the multi-word rule would drop)
+- **UI attributes** — the value of `placeholder=`, `title=`, `alt=`,
+  `aria-label=` and the rest; `className=` and `id=` deliberately not
+- **calls that show text** — `alert(…)`, `setText(…)`, the project's own
+  `ui_functions`, and `setAttribute("placeholder", …)`, where the visible
+  half is the second argument
+- **excluded by structure, not by heuristic** — import paths, the key half
+  of an object entry, and anything already going through `t()`
 
-So non-Python sources keep the **minimal heuristic tier**, reported under
-its own section explicitly labelled *LOW RELIABILITY*:
+Argument shapes differ far more than the calls do, and each was read off
+its grammar rather than assumed: PHP and C# wrap every argument in a node
+of its own, Kotlin and Swift keep theirs behind a `call_suffix`, Groovy
+behind an `arg_block`, and Dart has no call node at all — an identifier
+and a selector side by side. A file whose parse reports **errors** falls
+back to the heuristic tier rather than being read from a guessed
+structure.
 
-- UI-ish attributes — `placeholder=`, `title=`, `label=`, `tooltip=`, …
-- dialog-like calls — `alert("…")`, `setText("…")`, `Text("…")`, …
-- multi-word text nodes in `.vue`/`.jsx`/`.tsx`/`.svelte` templates
+*Measured on a real 70-file JSX application:* the heuristic tier found 15
+strings, the parsed tier finds 45 — all 15 of them plus 30 it could not
+see, and nothing lost. On a synthetic project with one file per supported
+language, all 22 planted UI strings are found across 23 languages.
 
-Multi-word strings only, hard-capped per file, `i18n-ignore` honoured.
-Treat these as hints to verify by hand — expect both false positives and
-missed strings; the reliable tiers remain the Python ones.
+The **heuristic tier is still there**, reported under its own section
+labelled *LOW RELIABILITY*, and answers for whatever the tree cannot: a
+missing grammar, a machine without tree-sitter, a file that will not
+parse. Which tier answered is recorded per file and named in the report,
+because "hint" and "read from the syntax" are not the same claim.
+
 
 ## Supported i18n layouts (auto-discovered)
 
@@ -283,16 +335,29 @@ so budgets are opt-in and absent means "report only".
 
 ## Project configuration
 
-One optional file, `.i18n-quality.json`, in the scanned root (or under
-`--root`). Absent, it is ignored. Unreadable, it says so and falls back to the
-built-ins rather than looking like a clean pass. A byte-order mark — what
-Notepad and Windows PowerShell add by default — is tolerated. Run
-`--vocab-help` for the short version.
+One optional file, `.i18n-quality.json`. **It writes itself** the first
+time it is missing: a commented template with every value empty, which
+changes nothing until something is filled in and is safe to delete. A
+read-only checkout says so and carries on with the built-ins. Present but
+unreadable also says so, rather than looking like a clean pass. A
+byte-order mark — what Notepad and Windows PowerShell add by default — is
+tolerated. Run `--vocab-help` for the short version.
+
+**In a monorepo each package answers for itself.** The nearest file above
+a source file is the one in force for it, inheriting everything it does
+not mention: lists add to the parent's, objects merge key by key, and a
+scalar is simply the nearer answer. Budgets are the exception and are read
+from the root only — a budget is a ceiling on the whole run, and the
+totals it compares against are global.
 
 ```json
 {
   "tech_words":   ["acmecloud", "widgetdrive", "unreal"],
   "ui_functions": ["HouseLabel", "showBanner"],
+  "exclude_dirs": ["vendor", "generated"],
+  "exempt":       { "raise_arguments": false },
+  "translation_kwargs":      ["msg_key"],
+  "extra_translation_calls": ["houseT", "useHouseTranslations"],
   "budgets":      { "high": 0 }
 }
 ```
@@ -308,6 +373,24 @@ Notepad and Windows PowerShell add by default — is tolerated. Run
   screen. The tool knows Qt, tkinter, GTK, wxPython and Kivy; a house
   widget library goes here so the high-severity tier keeps working for
   it instead of silently switching off.
+- **`exclude_dirs`** — directories to skip on top of the universal ones
+  (caches, virtualenvs, build output, the test tree). Non-shipping code
+  goes here: dev-only scripts, vendored copies, an archive of old
+  sources. Nothing about one repository belongs in the tool, which is why
+  this is a list here and not a constant in the script.
+- **`exempt`** — the three noise suppressions, each on by default:
+  `raise_arguments` (the message of an exception the code raises),
+  `regex_patterns`, `user_agents`. Whatever they hold back is **counted
+  and named in the report** rather than dropped in silence, so turning one
+  off is a decision made with the number in front of you. A project whose
+  exception text reaches a dialog turns `raise_arguments` off.
+- **`translation_kwargs`** — keyword names that carry the key, for a
+  wrapper written `t(key='nav.home')`. The common ones (`key`, `msgid`,
+  `id`, …) are built in.
+- **`extra_translation_calls`** — the project's own translation call
+  names, and factories whose *result* takes the key
+  (`useTranslations()('nav.home')`). Both shapes are tried for every name,
+  because declaring which one it is would be one more thing to get wrong.
 - **`budgets`** — see above.
 
 ## Checking the analyzer itself
@@ -324,7 +407,7 @@ and asserts each one:
   [OK  ] function_not_ignored   a string argument to a FUNCTION named get() still is
   [OK  ] vocab_loaded           the project's own tech_words reach the neutral vocabulary
   …
-🟢 Self-test passed (87 cases).
+🟢 Self-test passed (143 cases).
 ```
 
 Three scenarios run, not one: a JSON/Python project, a JavaScript one
@@ -336,8 +419,17 @@ and the ICU scenario exists because this codebase contains no ICU at all,
 so without a fixture the entire plural engine would ship unexercised.
 
 A fourth scenario covers extraction precision: `t()` written inside a
-string and inside a mid-line comment, next to genuine keys in Vue and PHP
-that an earlier design lost.
+string and inside a mid-line comment, next to genuine keys in Vue, PHP,
+QML, Objective-C and Lua — a single-file component's `<script>` body, a
+Qt `qsTr` call and an `@"…"` prefix among them, each added after being
+measured to fail rather than on the strength of a grammar existing.
+
+The JSON/Python scenario also carries a **monorepo**: a package with its
+own `.i18n-quality.json` declaring a widget name and an excluded folder,
+a sibling package declaring nothing, and cases asserting that the first
+package's settings apply inside it, inherit the root's, and are unknown to
+the sibling. Without that last one the feature would pass while being
+global after all.
 
 Two scenarios run **twice**, under both of their backends, because
 otherwise which half of that code gets tested is decided by whichever

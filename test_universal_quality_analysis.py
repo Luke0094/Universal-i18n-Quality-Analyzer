@@ -23,6 +23,7 @@ import os
 import sys
 import json
 import ast
+import html
 import re
 import subprocess
 from pathlib import Path
@@ -218,6 +219,20 @@ _L10N = {
                         "it": "🔤 Testi Hardcoded (contesto generico)"},
     "tier_gen_d":     {"en": "Strings that look like UI text but are not in direct widget calls.",
                         "it": "Stringhe che sembrano testo UI ma non sono in chiamate widget dirette."},
+    "tier_ast_t":     {"en": "🔤 Hardcoded texts — non-Python sources (parsed)",
+                        "it": "🔤 Testi Hardcoded — sorgenti non-Python (analizzati)"},
+    "tier_ast_d":     {"en": "Read from the parse tree, not guessed: each of "
+                             "these IS a text node, the value of a UI "
+                             "attribute, or an argument to a call that shows "
+                             "it. Import paths, object keys and code-shaped "
+                             "strings are excluded by structure rather than "
+                             "by heuristic.",
+                        "it": "Letti dall'albero sintattico, non ipotizzati: "
+                             "ognuno di questi È un nodo di testo, il valore "
+                             "di un attributo UI, o l'argomento di una "
+                             "chiamata che lo mostra. Percorsi di import, "
+                             "chiavi di oggetti e stringhe di codice sono "
+                             "esclusi per struttura, non per euristica."},
     "tier_rx_t":      {"en": "🔤 Hardcoded texts — non-Python sources (LOW RELIABILITY)",
                         "it": "🔤 Testi Hardcoded — sorgenti non-Python (BASSA AFFIDABILITÀ)"},
     "tier_rx_d":      {"en": "⚠️ Heuristic hints WITHOUT syntax context: expect false positives AND missed strings. UI-ish attributes (placeholder/title/label…), dialog-like calls and multi-word template text nodes only. Treat as hints, verify by hand.",
@@ -234,6 +249,36 @@ _L10N = {
                         "it": "❌ Auto-test FALLITO — {n} caso/i: {ids}"},
     "cfg_unreadable":  {"en": "   ⚠️ {file} could not be read ({err}) — built-in defaults only",
                         "it": "   ⚠️ {file} non leggibile ({err}) — solo impostazioni predefinite"},
+    "cfg_created":    {"en": "   📝 {file} did not exist — wrote a commented "
+                             "template. It is optional: an empty one changes "
+                             "nothing, and deleting it is fine.",
+                        "it": "   📝 {file} non esisteva — scritto un modello "
+                             "commentato. È opzionale: vuoto non cambia "
+                             "nulla, e cancellarlo va bene."},
+    "cfg_uncreatable": {"en": "   ℹ️ {file} is absent and could not be created "
+                              "({err}) — built-in defaults only",
+                        "it": "   ℹ️ {file} assente e non creabile ({err}) — "
+                              "solo impostazioni predefinite"},
+    "exempt_note":    {"en": "   🤫 {n} finding(s) held back as known noise: "
+                             "{detail}. Turn any of them back on with "
+                             "\"exempt\" in {file}.",
+                        "it": "   🤫 {n} risultato/i trattenuti come rumore "
+                             "noto: {detail}. Riattivali con \"exempt\" in "
+                             "{file}."},
+    "r_exempt_h":     {"en": "\n## 🤫 Held back as known noise\n\n"
+                             "> Not silently: each kind can be turned back on "
+                             "with `\"exempt\"` in `{file}`.\n\n",
+                        "it": "\n## 🤫 Trattenuti come rumore noto\n\n"
+                             "> Non in silenzio: ogni tipo si riattiva con "
+                             "`\"exempt\"` in `{file}`.\n\n"},
+    "r_exempt_row":   {"en": "- `{kind}` — {n}: {why}\n",
+                        "it": "- `{kind}` — {n}: {why}\n"},
+    "ex_raise":       {"en": "messages of exceptions the code raises",
+                        "it": "messaggi delle eccezioni sollevate dal codice"},
+    "ex_regex":       {"en": "regular-expression patterns",
+                        "it": "espressioni regolari"},
+    "ex_agent":       {"en": "HTTP User-Agent strings",
+                        "it": "stringhe User-Agent HTTP"},
     "an_severity":    {"en": "🎚️ FINDINGS BY SEVERITY...",
                         "it": "🎚️ RISULTATI PER GRAVITÀ..."},
     "sev_count":      {"en": "   {level}: {n}",
@@ -377,12 +422,15 @@ yaml_mod = _try_import_yaml()
 # ⚙️ CONFIGURAZIONE
 # ==========================================
 PROJECT_ROOT = Path(__file__).parent.parent
-PYTHON_EXCLUDES = {"__pycache__", ".git", ".venv", "venv", "node_modules",
-                   "build", "dist", "tests", "egg-info",
-                   # Non-shipping code: the user's manual backup tree and the
-                   # dev-only asset generators — scanning them duplicated
-                   # every finding and flagged Pillow mode strings (PNG/RGBA).
-                   "OLD", "tools"}
+# Directories no project wants scanned: caches, virtualenvs, build output,
+# and the test tree. Anything BEYOND this is a statement about one
+# particular repository — a folder of dev-only scripts, a vendored copy, an
+# archive of old code — and belongs in that repository's own
+# PROJECT_VOCAB_FILE under "exclude_dirs", not in here. This tool stays
+# universal; the file next to the project says what the project is.
+PYTHON_EXCLUDES_BUILTIN = {"__pycache__", ".git", ".venv", "venv",
+                           "node_modules", "build", "dist", "tests",
+                           "egg-info"}
 
 # ISO 639-1 codes we recognise as language keys
 _ISO_CODES = {
@@ -399,7 +447,36 @@ _ISO_CODES = {
 
 LANGUAGE_MAP = {c: c.split('-')[0] for c in _ISO_CODES}
 
-TRANSLATION_FUNCTIONS = {'tr', '_', 'translate', 'get_text', 't', 'i18n', 'ngettext', 'gettext'}
+TRANSLATION_FUNCTIONS = {'tr', '_', 'translate', 'get_text', 't', 'i18n',
+                         'ngettext', 'gettext',
+                         # gettext's disambiguating and domain-qualified
+                         # forms, and Qt's own. See _KEY_ARG_POSITIONS: what
+                         # these carry in slot 0 is a CONTEXT or a DOMAIN,
+                         # and reading it as the key files a string nobody
+                         # ever translates into the used-keys set — which
+                         # then masks a real orphan.
+                         'pgettext', 'npgettext', 'dgettext', 'dngettext',
+                         'dcgettext', 'N_', 'NSLocalizedString'}
+
+#: name -> the positional slots that carry a KEY. Anything absent uses (0,).
+#:
+#: ngettext takes the singular AND the plural, and both are keys: reading
+#: only the first leaves the plural form looking unreferenced. pgettext
+#: takes a disambiguating context first, npgettext a context and then both
+#: forms, the d* family a domain first, and Qt's qsTranslate a context.
+_KEY_ARG_POSITIONS = {
+    'ngettext': (0, 1),
+    'pgettext': (1,),
+    'npgettext': (1, 2),
+    'dgettext': (1,),
+    'dcgettext': (1,),
+    'dngettext': (1, 2),
+    'qsTranslate': (1,),
+}
+
+
+def _key_positions(name: str):
+    return _KEY_ARG_POSITIONS.get(name, (0,))
 
 # ── Multi-language source scanning ──────────────────────────────────────────
 # Python gets the FULL context-aware AST analysis (used keys + hardcoded
@@ -410,12 +487,66 @@ _REGEX_CODE_EXTENSIONS = {
     '.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.vue', '.svelte',
     '.php', '.dart', '.kt', '.kts', '.java', '.cs', '.rb', '.go', '.rs',
     '.qml',
+    # Added after measuring, not on the strength of a grammar existing:
+    # each of these rejects a call written inside a string and inside a
+    # comment, which is the thing the regex cannot do. What differs is how
+    # much of each ecosystem is key-shaped at all — see the tier table in
+    # the README, where the text-based ones say so.
+    '.lua', '.swift', '.m', '.mm',
+    '.c', '.h', '.cpp', '.cc', '.cxx', '.hpp',
+    '.ex', '.exs', '.scala', '.groovy', '.pl', '.pm', '.hx', '.astro',
 }
 
 # t('key') / tr("key") / $t('key') / i18n.t('key') / __('key') …
+# Longest first: the alternation is ordered, and `t` would otherwise win
+# at a position where `translate` was meant. qsTr/qsTranslate/qsTrId are
+# Qt's own, and QML has no others — without them a .qml file's keys were
+# invisible to both backends at once.
+_CODE_CALL_NAMES = ("NSLocalizedString", "qsTranslate", "qsTrId",
+                    "ngettext", "translate", "get_text", "gettext",
+                    "i18n", "qsTr", "tc", "tr", "N_", "__", "t")
+# Objective-C writes @"key" and C/C++ can write L"key" / u8"key": the quote
+# is not the first character after the bracket, and requiring it to be lost
+# every NSLocalizedString in a .m file at once.
+_STR_PREFIX = r"""(?:@|u8|L|u|U)?"""
 _RX_CODE_CALL = re.compile(
-    r"""(?:\b|\$)(?:t|tr|tc|translate|gettext|ngettext|i18n|get_text|__)"""
-    r"""\s*\(\s*(['"])([A-Za-z0-9][A-Za-z0-9_.-]*)\1""")
+    r"""(?:\b|\$)(?:""" + "|".join(_CODE_CALL_NAMES) + r""")"""
+    r"""\s*\(\s*""" + _STR_PREFIX + r"""(['"])([A-Za-z0-9][A-Za-z0-9_.-]*)\1""")
+# Hooks and getters that RETURN the translation function, so the key is
+# passed to the call's RESULT and the outer call has no name of its own:
+#   const t = useTranslations('nav'); t('home')     ← caught by the name t
+#   useTranslations('nav')('home')                  ← caught only here
+# next-intl and next-international are the ones in wide use; anything else
+# goes in the project file under "extra_translation_calls".
+_TS_FACTORY_NAMES = frozenset((
+    'useTranslations', 'getTranslations',
+    'useScopedI18n', 'getScopedI18n',
+    'useI18n', 'getI18n', 'useTranslate',
+))
+_RX_CODE_FACTORY = re.compile(
+    r"""(?:\b|\$)(?:""" + "|".join(sorted(_TS_FACTORY_NAMES)) + r""")"""
+    r"""\s*\([^()]*\)\s*\(\s*(['"])([A-Za-z0-9][A-Za-z0-9_.-]*)\1""")
+# The names whose key is NOT in the first slot need the leading arguments
+# read together, so the right one can be picked afterwards.
+_RX_CODE_CALL_MULTI = re.compile(
+    r"""(?:\b|\$)(""" + "|".join(sorted(_KEY_ARG_POSITIONS, key=len,
+                                         reverse=True)) + r""")"""
+    r"""\s*\(\s*""" + _STR_PREFIX + r"""(['"])([^'"]*)\2"""
+    r"""(?:\s*,\s*""" + _STR_PREFIX + r"""(['"])([^'"]*)\4)?"""
+    r"""(?:\s*,\s*""" + _STR_PREFIX + r"""(['"])([^'"]*)\6)?""")
+
+
+def _multi_arg_keys(src: str):
+    """``[(offset, key)]`` for calls whose key is not the first argument."""
+    out = []
+    for m in _RX_CODE_CALL_MULTI.finditer(src):
+        values = (m.group(3), m.group(5), m.group(7))
+        for slot in _key_positions(m.group(1)):
+            if slot < len(values) and values[slot]:
+                out.append((m.start(), values[slot]))
+    return out
+
+
 # JS template literals: t(`section.${x}`) → dynamic family 'section.'
 _RX_CODE_TEMPLATE = re.compile(
     r"""(?:\b|\$)(?:t|tr|tc|translate|i18n)\s*\(\s*`([A-Za-z0-9][A-Za-z0-9_.-]*\.)\$\{""")
@@ -455,13 +586,43 @@ def _blank_comments(src: str) -> str:
         lambda m: re.sub(r'[^\n]', ' ', m.group(0)), src)
 
 
+_rx_project_cache: Dict[str, object] = {}
+
+
+def _rx_project_calls():
+    """A pattern for the project's own translation names, or None.
+
+    Both shapes at once — called directly and called through a factory —
+    because a name declared in the project file could be either and asking
+    which would be one more thing to get wrong.
+    """
+    names = _extra_translation_calls()
+    cache_key = "|".join(sorted(names))
+    if cache_key not in _rx_project_cache:
+        rx = None
+        if names:
+            alt = "|".join(re.escape(n) for n in sorted(names))
+            rx = re.compile(
+                r"""(?:\b|\$)(?:""" + alt + r""")"""
+                r"""\s*(?:\([^()]*\)\s*)?\(\s*(['"])"""
+                r"""([A-Za-z0-9][A-Za-z0-9_.-]*)\1""")
+        _rx_project_cache[cache_key] = rx
+    return _rx_project_cache[cache_key]
+
+
 def _extract_keys_regex(src: str) -> Tuple[Set[str], Set[str]]:
     """Best-effort key extraction for non-Python sources."""
     src = _blank_comments(src)
     keys: Set[str] = set()
     prefixes: Set[str] = set()
-    for m in _RX_CODE_CALL.finditer(src):
-        val = m.group(2)
+    for rx in (_RX_CODE_CALL, _RX_CODE_FACTORY, _rx_project_calls()):
+        if rx is None:
+            continue
+        for m in rx.finditer(src):
+            val = m.group(2)
+            if PythonCodeAnalyzer._KEY_PATTERN.match(val):
+                keys.add(val)
+    for _off, val in _multi_arg_keys(src):
         if PythonCodeAnalyzer._KEY_PATTERN.match(val):
             keys.add(val)
     for m in _RX_CODE_TEMPLATE.finditer(src):
@@ -478,11 +639,17 @@ def _extract_keys_regex(src: str) -> Tuple[Set[str], Set[str]]:
 #
 # tree-sitter parses 300+ grammars the same way. It is used here to CORRECT
 # the regex rather than to replace it, and that is a deliberate choice made
-# after measuring: on Vue and PHP the grammars returned no calls at all (Vue
-# keeps the <script> body as raw text without a language injection), so a
-# straight swap would have lost real keys and reported live ones as orphans.
-# Losing a key is the worse failure — it turns into a false orphan and hides
-# a real unresolved-key finding — so the rule is:
+# after measuring. The measurement has moved since: PHP now parses cleanly,
+# and Vue and Svelte do too once their <script> bodies are handed to the
+# JavaScript grammar themselves (the SFC grammars keep them as raw text —
+# see _sfc_script_blocks). Every extension in _TS_LANG_BY_EXT now rejects a
+# call written inside a string or a comment, which is the thing a regex
+# cannot do.
+#
+# The rule stays as it is anyway, because it costs nothing and the failure
+# it guards against is the expensive one: a grammar that goes missing, or a
+# file that will not parse, must not turn live keys into false orphans and
+# hide a real unresolved-key finding. So:
 #
 #   keys = (regex hits the tree cannot disprove) + (calls the tree found)
 #
@@ -500,6 +667,14 @@ _TS_LANG_BY_EXT = {
     '.java': 'java', '.cs': 'csharp',
     '.rb': 'ruby', '.go': 'go', '.rs': 'rust',
     '.qml': 'qmljs',
+    '.lua': 'lua', '.swift': 'swift',
+    '.m': 'objc', '.mm': 'objc',
+    '.c': 'c', '.h': 'c',
+    '.cpp': 'cpp', '.cc': 'cpp', '.cxx': 'cpp', '.hpp': 'cpp',
+    '.ex': 'elixir', '.exs': 'elixir',
+    '.scala': 'scala', '.groovy': 'groovy',
+    '.pl': 'perl', '.pm': 'perl',
+    '.hx': 'haxe', '.astro': 'astro',
 }
 
 # Node types that mean "a function is being called". The grammars disagree on
@@ -508,11 +683,24 @@ _TS_CALL_TYPES = frozenset((
     'call', 'call_expression', 'function_call_expression', 'function_call',
     'method_invocation', 'invocation_expression', 'method_call',
     'call_statement', 'scoped_call_expression', 'member_call_expression',
+    # Groovy calls its call node `func`, which reads like a declaration and
+    # is not one. Measured, not guessed.
+    'func',
 ))
 
 # Names accepted as translation calls, on top of TRANSLATION_FUNCTIONS, to
 # match what the regex already recognises.
-_TS_EXTRA_CALL_NAMES = frozenset(('tc', '__'))
+_TS_EXTRA_CALL_NAMES = frozenset((
+    'tc', '__',
+    # Qt. QML translates through these and nothing else, so a .qml file
+    # read without them comes back empty however good the grammar is.
+    'qsTr', 'qsTranslate', 'qsTrId',
+    # Apple's, and gettext's mark-for-translation macro. Both carry the
+    # source TEXT rather than a key in most projects, which is why the
+    # tier table calls those languages text-based — but a project that
+    # does use keys with them is now read.
+    'NSLocalizedString', 'NSLocalizedStringWithDefaultValue', 'N_',
+))
 
 # Set true to ignore tree-sitter and exercise the regex path. The self-test
 # flips it so BOTH backends are covered on the same fixture.
@@ -540,6 +728,25 @@ def _ts_parser(lang: str):
     return parser
 
 
+def _ts_dart_call(node):
+    """``(name, argument container)`` when *node* is Dart's shape of a call.
+
+    Dart's grammar has no call node: ``alert('x')`` parses as an
+    identifier followed by a *selector* holding the arguments, both direct
+    children of the statement. Recognised by that shape rather than by a
+    type name, so it costs nothing in the grammars that do have one.
+    """
+    name = None
+    for child in node.children:
+        if child.type in ('identifier', 'scoped_identifier'):
+            name = child.text.decode('utf-8', 'replace').strip()
+        elif child.type == 'selector' and name:
+            return name, child
+        elif child.type not in (';', 'type_identifier'):
+            name = name if child.type == 'selector' else None
+    return "", None
+
+
 def _ts_callee_name(node) -> str:
     """The bare function name of a call node.
 
@@ -563,6 +770,20 @@ def _ts_callee_name(node) -> str:
     return text.strip().lstrip('$@')
 
 
+def _ts_factory_name(node) -> str:
+    """When a call's callee is ITSELF a call, the inner call's name.
+
+    ``useTranslations()('nav.home')`` parses as a call whose function is a
+    call, so _ts_callee_name has nothing but ``useTranslations()`` to work
+    with and matches nothing. The name that decides is one level down.
+    """
+    target = (node.child_by_field_name('function')
+              or node.child_by_field_name('method'))
+    if target is None or target.type not in _TS_CALL_TYPES:
+        return ""
+    return _ts_callee_name(target)
+
+
 def _ts_string_value(node):
     """(text, is_interpolated) for a string-ish node, else (None, False).
 
@@ -573,6 +794,13 @@ def _ts_string_value(node):
     if 'string' not in node.type:
         return None, False
     raw = node.text.decode('utf-8', 'replace')
+    # Same prefixes as _STR_PREFIX. Left on, the quote-stripping below
+    # matches nothing and the key comes back with @ still attached.
+    for _pfx in ('@', 'u8', 'L', 'u', 'U'):
+        if (raw.startswith(_pfx) and len(raw) > len(_pfx)
+                and raw[len(_pfx)] in ('"', "'")):
+            raw = raw[len(_pfx):]
+            break
     interpolated = any('interpolation' in c.type or 'substitution' in c.type
                        for c in node.children)
     for quote in ('"""', "'''", '`', '"', "'"):
@@ -583,6 +811,64 @@ def _ts_string_value(node):
     if interpolated:
         raw = re.split(r'\$\{|#\{|\{\{|\$\(', raw, maxsplit=1)[0]
     return raw, interpolated
+
+
+#: Nodes that hold a call's arguments without being called that. Kotlin and
+#: Swift put them behind a call_suffix, Groovy behind an arg_block, Dart
+#: behind a selector — read off the grammars, because they agree on nothing.
+_ARG_CONTAINERS = ('arguments', 'argument_list', 'value_arguments',
+                   'call_suffix', 'arg_block', 'selector',
+                   'value_argument_list', 'argument_part')
+#: A wrapper around one argument. PHP and C# both have one; unwrapped, the
+#: string inside is invisible to every check that looks at an argument.
+_ARG_WRAPPERS = ('argument', 'value_argument', 'labeled_argument')
+
+
+def _ts_arg_nodes(node):
+    """The argument nodes of a call, punctuation and wrappers removed."""
+    args = (node.child_by_field_name('arguments')
+            or node.child_by_field_name('argument_list'))
+    if args is None:
+        for child in node.children:
+            if child.type in _ARG_CONTAINERS or 'argument' in child.type:
+                args = child
+                break
+    if args is None:
+        return []
+    # One more level where the container is itself a wrapper: Kotlin's
+    # call_suffix holds a value_arguments, not the arguments themselves.
+    while True:
+        inner = [c for c in args.children
+                 if c.type in _ARG_CONTAINERS and c.type != args.type]
+        if len(inner) != 1:
+            break
+        args = inner[0]
+    out = []
+    for child in args.children:
+        if child.type in (',', '(', ')', '[', ']'):
+            continue
+        if child.type in _ARG_WRAPPERS:
+            real = [c for c in child.children if c.type not in (',', ':')]
+            out.extend(real or [child])
+        else:
+            out.append(child)
+    return out
+
+
+def _ts_string_args(node, positions):
+    """``[(text, interpolated)]`` for the given positional slots.
+
+    Slots rather than "the first one", because pgettext's first argument
+    is a context and ngettext's second is a key in its own right.
+    """
+    args = _ts_arg_nodes(node)
+    out = []
+    for slot in positions:
+        if slot < len(args):
+            text, interpolated = _ts_string_value(args[slot])
+            if text is not None:
+                out.append((text, interpolated))
+    return out
 
 
 def _ts_first_string_arg(node):
@@ -632,9 +918,14 @@ def _ts_scan(src_bytes: bytes, root):
             holes.append((node.start_byte, node.end_byte))
         if ntype in _TS_CALL_TYPES:
             name = _ts_callee_name(node)
-            if name in TRANSLATION_FUNCTIONS or name in _TS_EXTRA_CALL_NAMES:
-                text, interpolated = _ts_first_string_arg(node)
-                if text:
+            _extra = _extra_translation_calls()
+            if (name in TRANSLATION_FUNCTIONS or name in _TS_EXTRA_CALL_NAMES
+                    or name in _extra
+                    or _ts_factory_name(node) in (_TS_FACTORY_NAMES | _extra)):
+                for text, interpolated in _ts_string_args(
+                        node, _key_positions(name)):
+                    if not text:
+                        continue
                     if interpolated:
                         if text.endswith('.'):
                             prefixes.add(text)
@@ -642,6 +933,41 @@ def _ts_scan(src_bytes: bytes, root):
                         keys.add(text)
         stack.extend(node.children)
     return spans, holes, keys, prefixes
+
+
+# Single-file components keep their <script> body as RAW TEXT: the Vue and
+# Svelte grammars do not inject JavaScript into it, so the tree cannot point
+# at a string or a comment in there and the regex result stood uncorrected —
+# a call written inside a string counted as a use. Measured, not assumed:
+# both were the only extensions whose decoys survived.
+_RX_SFC_SCRIPT = re.compile(
+    r"<script\b([^>]*)>(.*?)</script\s*>", re.S | re.I)
+# Astro keeps its component script in --- fences at the top of the file, and
+# its grammar hands that back as raw text for the same reason Vue's does.
+_RX_ASTRO_FRONT = re.compile(r"\A\s*---\r?\n(.*?)\r?\n---", re.S)
+_SFC_EXTS = frozenset(('.vue', '.svelte', '.astro'))
+
+
+def _sfc_script_blocks(src: str):
+    """``(language, start_byte, body)`` for each <script> in *src*.
+
+    The offset is in BYTES of the utf-8 encoding, because that is what the
+    spans the caller merges are measured in.
+    """
+    out = []
+    front = _RX_ASTRO_FRONT.match(src)
+    if front:
+        out.append(('typescript',
+                    len(src[:front.start(1)].encode('utf-8', 'replace')),
+                    front.group(1)))
+    for match in _RX_SFC_SCRIPT.finditer(src):
+        attrs = (match.group(1) or "").lower()
+        lang = 'typescript' if ('lang="ts"' in attrs or "lang='ts'" in attrs
+                                or 'lang="typescript"' in attrs) else 'javascript'
+        body = match.group(2) or ""
+        start = len(src[:match.start(2)].encode('utf-8', 'replace'))
+        out.append((lang, start, body))
+    return out
 
 
 def _extract_keys_ast(src: str, ext: str):
@@ -665,6 +991,35 @@ def _extract_keys_ast(src: str, ext: str):
         if tree is None or tree.root_node is None:
             return None
         spans, holes, keys, prefixes = _ts_scan(data, tree.root_node)
+        # A tree with error nodes has guessed at the structure, and its
+        # idea of where a string ends is exactly what would drop a live
+        # regex hit. Keep what it FOUND — a union can only help — and stop
+        # believing it about what to discard. This matters most where one
+        # extension has several languages behind it (.h, .m), where the
+        # grammar picked may simply be the wrong one.
+        if getattr(tree.root_node, 'has_error', False):
+            spans, holes = [], []
+        # A single-file component's script is raw text to its own grammar.
+        # Parse each block with the language it declares and shift the
+        # spans back into the file's coordinates, so `quoted()` below can
+        # reject a call written inside a string in there.
+        if ext in _SFC_EXTS:
+            for _lang, _off, _body in _sfc_script_blocks(src):
+                _p = _ts_parser(_lang)
+                if _p is None:
+                    continue
+                try:
+                    _d = _body.encode('utf-8', 'replace')
+                    _t = _p.parse(_d)
+                    if _t is None or _t.root_node is None:
+                        continue
+                    _sp, _ho, _k, _pf = _ts_scan(_d, _t.root_node)
+                except Exception:
+                    continue
+                spans += [(a + _off, b + _off) for a, b in _sp]
+                holes += [(a + _off, b + _off) for a, b in _ho]
+                keys |= _k
+                prefixes |= _pf
     except Exception:
         logger.debug("tree-sitter could not read a %s file", ext,
                      exc_info=True)
@@ -680,11 +1035,17 @@ def _extract_keys_ast(src: str, ext: str):
     # The regex runs on the RAW source here: blanking comments is the trick
     # the regex path needs precisely because it has no tree, and the tree
     # marks them properly.
-    for match in _RX_CODE_CALL.finditer(src):
-        value = match.group(2)
-        if quoted(match.start()):
+    for rx in (_RX_CODE_CALL, _RX_CODE_FACTORY, _rx_project_calls()):
+        if rx is None:
             continue
-        if PythonCodeAnalyzer._KEY_PATTERN.match(value):
+        for match in rx.finditer(src):
+            value = match.group(2)
+            if quoted(match.start()):
+                continue
+            if PythonCodeAnalyzer._KEY_PATTERN.match(value):
+                keys.add(value)
+    for offset, value in _multi_arg_keys(src):
+        if not quoted(offset) and PythonCodeAnalyzer._KEY_PATTERN.match(value):
             keys.add(value)
     for match in _RX_CODE_TEMPLATE.finditer(src):
         if not quoted(match.start()):
@@ -776,6 +1137,256 @@ def _looks_like_ui_text(text: str) -> bool:
         # branches of a ternary look exactly like this: `) : cond ? (`.
         return False
     return True
+
+
+# ── Hardcoded UI text, read from the tree ───────────────────────────────
+# The regex tier below can only guess: a bare string in JS says nothing
+# about itself, and `>text<` matches a comparison as readily as a text
+# node. The tree knows which bytes are a JSX text node, which are the
+# value of a `placeholder=`, and which are an import path or an object
+# key — the three things the regex could not tell apart.
+#
+# Node type names were read off the grammars rather than assumed; they
+# differ between the JSX family and the HTML family and agree on nothing.
+
+#: Attributes whose value is shown to a person. Same list the regex uses.
+_UI_ATTRS = frozenset((
+    'placeholder', 'title', 'label', 'alt', 'aria-label', 'aria-placeholder',
+    'tooltip', 'caption', 'hint', 'headertext', 'buttontext',
+))
+#: Calls whose first string argument is shown. Same list the regex uses.
+_UI_CALLS = frozenset((
+    'alert', 'confirm', 'prompt', 'setText', 'setTitle', 'setLabel',
+    'setPlaceholder', 'setTooltip', 'setHeader', 'showMessage',
+    'Text', 'Label', 'SnackBar',
+))
+#: Calls that put text into an attribute named by their FIRST argument.
+_UI_SETTERS = frozenset(('setAttribute', 'attr', 'setProperty'))
+#: Ancestors that make a string structural rather than visible.
+_NOT_TEXT_PARENTS = frozenset((
+    'import_statement', 'export_statement', 'import_specifier',
+    'call_expression',        # handled separately, by callee name
+))
+#: A string sitting in the KEY half of an object entry.
+_PAIR_TYPES = frozenset(('pair', 'object_assignment_pattern'))
+
+
+def _ts_attr_name(node) -> str:
+    """The attribute's name, whichever family the grammar belongs to."""
+    named = (node.child_by_field_name('name')
+             or node.child_by_field_name('attribute_name'))
+    if named is not None:
+        return named.text.decode('utf-8', 'replace').strip().lower()
+    for child in node.children:
+        if child.type in ('property_identifier', 'jsx_attribute_name',
+                          'attribute_name', 'identifier'):
+            return child.text.decode('utf-8', 'replace').strip().lower()
+    return ""
+
+
+def _ts_inner_text(node) -> str:
+    """The text of a string-ish node with its quotes and prefix removed."""
+    value, _ = _ts_string_value(node)
+    if value is not None:
+        return value
+    return node.text.decode('utf-8', 'replace')
+
+
+def _byte_position(data: bytes, offset: int):
+    """``(line, column)`` of a byte offset, both 1-based, column in CHARS.
+
+    Characters and not bytes: an editor counts columns the way a person
+    reads them, and this project's own strings are full of accents.
+    """
+    line = data.count(b"\n", 0, offset) + 1
+    start = data.rfind(b"\n", 0, offset) + 1
+    col = len(data[start:offset].decode('utf-8', 'replace')) + 1
+    return line, col
+
+
+def _hardcoded_from_tree(data: bytes, root, out: list, offset: int = 0):
+    """Collect UI-context strings from one parse tree into *out*."""
+    stack = [(root, ())]
+    while stack:
+        node, ancestors = stack.pop()
+        ntype = node.type
+
+        # A sentence broken by an interpolation is still one sentence.
+        # `<span>Total for {n} nights</span>` is three children — text,
+        # expression, text — and reporting the pieces gave findings like
+        # "Total for" and "nights", which read as noise and hide the fact
+        # that a whole line of prose is hardcoded. Joined at the element,
+        # with the holes marked, it reads as what it is.
+        if ntype in ('jsx_element', 'element', 'template_element'):
+            joined, first = _ts_element_text(node)
+            if joined:
+                out.append((first + offset, joined, 'element'))
+                for child in node.children:
+                    if child.type not in ('jsx_text', 'text'):
+                        stack.append((child, ancestors + (ntype,)))
+                continue
+
+        # a person reads these directly
+        elif ntype in ('jsx_text', 'text', 'raw_text') and not node.children:
+            parent = ancestors[-1] if ancestors else ''
+            if ntype != 'raw_text' or parent in ('element', 'template_element'):
+                out.append((node.start_byte + offset,
+                            _ts_inner_text(node), 'element'))
+
+        elif ntype in ('jsx_attribute', 'attribute'):
+            if _ts_attr_name(node) in _UI_ATTRS:
+                for child in _ts_descendants(node):
+                    if child.type in ('string_fragment', 'attribute_value'):
+                        out.append((child.start_byte + offset,
+                                    _ts_inner_text(child), 'attribute'))
+                        break
+
+        elif ntype in _TS_CALL_TYPES or ntype == 'expression_statement':
+            if ntype == 'expression_statement':
+                # Only Dart reaches here, and only in its own shape.
+                name, container = _ts_dart_call(node)
+                if not name or container is None:
+                    for child in node.children:
+                        stack.append((child, ancestors + (ntype,)))
+                    continue
+                args = _ts_arg_nodes(container)
+            else:
+                name = _ts_callee_name(node)
+                args = _ts_arg_nodes(node)
+            if name in _UI_SETTERS and len(args) >= 2:
+                # setAttribute("placeholder", "text") — the visible half is
+                # the SECOND argument, and the first says whether it is
+                # visible at all.
+                which, _ = _ts_string_value(args[0])
+                text, interpolated = _ts_string_value(args[1])
+                if (which or "").strip().lower() in _UI_ATTRS and text \
+                        and not interpolated:
+                    out.append((args[1].start_byte + offset, text, 'call'))
+            elif name in _UI_CALLS or name in _ui_funcs():
+                for arg in args:
+                    text, interpolated = _ts_string_value(arg)
+                    if text and not interpolated:
+                        out.append((arg.start_byte + offset, text, 'call'))
+                        break
+
+        for child in node.children:
+            stack.append((child, ancestors + (ntype,)))
+
+
+def _ts_element_text(node):
+    """``(visible text, first byte)`` of one element's own text children.
+
+    Only DIRECT children: a nested element is its own line of prose and
+    gets reported on its own, at its own position. Interpolations between
+    the pieces become ``{…}``, because the text either side of a hole is
+    one sentence and reporting the halves separately reads as noise.
+    """
+    parts, first, saw_hole = [], None, False
+    for child in node.children:
+        # An HTML entity is part of the label, not punctuation around it.
+        # `<button>Succ &gt;</button>` parses as a text node beside a
+        # character reference, and reading only the text left "Succ" — a
+        # single word, which the multi-word rule then dropped. A real
+        # button label, lost to a grammar detail.
+        if child.type in ('jsx_text', 'text', 'html_character_reference',
+                          'character_reference', 'entity'):
+            piece = child.text.decode('utf-8', 'replace')
+            if child.type != 'jsx_text' and child.type != 'text':
+                piece = html.unescape(piece)
+            piece = piece.strip()
+            if not piece:
+                continue
+            if saw_hole and parts:
+                parts.append('{…}')
+                saw_hole = False
+            parts.append(piece)
+            if first is None:
+                first = child.start_byte
+        elif child.type in ('jsx_expression', 'interpolation'):
+            if parts:
+                saw_hole = True
+    return (' '.join(parts) if parts else ""), (first or 0)
+
+
+def _ts_descendants(node):
+    stack = list(node.children)
+    while stack:
+        current = stack.pop()
+        yield current
+        stack.extend(current.children)
+
+
+def _extract_hardcoded_ast(src: str, ext: str):
+    """``[(line, col, text)]`` with syntax context, or None when unavailable.
+
+    None means "ask the regex instead" — no grammar, no tree-sitter, or a
+    parse that reported errors. It never means "nothing here", which is a
+    legitimate answer returned as an empty list.
+    """
+    if _FORCE_REGEX_EXTRACTION:
+        return None
+    lang = _TS_LANG_BY_EXT.get(ext)
+    if not lang:
+        return None
+    parser = _ts_parser(lang)
+    if parser is None:
+        return None
+    try:
+        data = src.encode('utf-8', 'replace')
+        tree = parser.parse(data)
+        if tree is None or tree.root_node is None:
+            return None
+        if getattr(tree.root_node, 'has_error', False):
+            return None          # a guessed structure is not context
+        found: list = []
+        _hardcoded_from_tree(data, tree.root_node, found)
+        # A single-file component's script is raw text to its own grammar,
+        # so its alert()s are invisible until it is parsed on its own.
+        if ext in _SFC_EXTS:
+            for _lang, _off, _body in _sfc_script_blocks(src):
+                _p = _ts_parser(_lang)
+                if _p is None:
+                    continue
+                try:
+                    _d = _body.encode('utf-8', 'replace')
+                    _t = _p.parse(_d)
+                    if _t is None or _t.root_node is None:
+                        continue
+                    if getattr(_t.root_node, 'has_error', False):
+                        continue
+                    _hardcoded_from_tree(_d, _t.root_node, found, _off)
+                except Exception:
+                    continue
+    except Exception:
+        logger.debug("tree-sitter could not read %s for text", ext,
+                     exc_info=True)
+        return None
+
+    lines = src.splitlines()
+    seen: set = set()
+    out: list = []
+    for byte_off, text, kind in sorted(found):
+        text = (text or "").strip()
+        if not text or text in seen or not _looks_like_ui_text(text):
+            continue
+        # A tail of a sentence whose middle is an interpolation: "/ ID",
+        # ": max", "( {…} tot.)". Each IS hardcoded, and each is unusable
+        # as a finding — there is nothing there to translate. Four letters
+        # is the bar, counting neither punctuation nor the hole markers.
+        #
+        # ELEMENT text only. An attribute value and a call argument are
+        # whole strings by construction, never fragments: applying this to
+        # them cost `placeholder="Es. 5.00"`, which is exactly the kind of
+        # short label the check exists to find.
+        if kind == 'element' and len(
+                re.sub(r'\{…\}|[^A-Za-zÀ-ÿ]', '', text)) < 4:
+            continue
+        lineno, col = _byte_position(data, byte_off)
+        if 0 < lineno <= len(lines) and 'i18n-ignore' in lines[lineno - 1]:
+            continue
+        seen.add(text)
+        out.append((lineno, col, text))
+    return out[:40]      # same per-file cap as the regex tier
 
 
 def _extract_hardcoded_regex(src: str, ext: str) -> List[Tuple[int, int, str]]:
@@ -918,7 +1529,7 @@ PROJECT_VOCAB_FILE = ".i18n-quality.json"
 _project_config_cache: Optional[dict] = None
 # Whether the file was present and readable, for the run summary: a
 # configuration that is quietly ignored is worse than none at all.
-_config_state: dict = {"found": True, "error": ""}
+_config_state: dict = {"found": True, "error": "", "created": False}
 
 
 def _tech_words() -> Set[str]:
@@ -926,13 +1537,200 @@ def _tech_words() -> Set[str]:
     return _TECH_WORDS_BUILTIN | _project_config_list("tech_words")
 
 
+CONFIG_TEMPLATE = {
+    "_comment": (
+        "Optional configuration for the i18n quality analyzer. Everything "
+        "here describes THIS project; the analyzer itself stays "
+        "project-agnostic. An empty file changes nothing, and deleting it "
+        "is fine — the tool runs on its built-ins."),
+
+    "_tech_words": (
+        "Treated as language-neutral by the mixed-language check: spelled "
+        "the same in every locale, so finding one in a translated string is "
+        "not evidence it was left in the wrong language. The analyzer ships "
+        "the wide-reach names (operating systems, clouds, protocols); this "
+        "is where a project adds its own domain."),
+    "tech_words": [],
+
+    "_ui_functions": (
+        "Extra call names whose string arguments reach the screen, on top "
+        "of the toolkits the analyzer knows. Add house widgets here so the "
+        "high-severity tier keeps working for them."),
+    "ui_functions": [],
+
+    "_exclude_dirs": (
+        "Directories to skip, on top of the universal ones (caches, "
+        "virtualenvs, build output, the test tree). This is where "
+        "non-shipping code goes: dev-only scripts, vendored copies, an "
+        "archive of old sources."),
+    "exclude_dirs": [],
+
+    "_exempt": (
+        "Noise suppressions, each counted and named in the report rather "
+        "than applied silently. Turn one off if your project localises that "
+        "kind of string: exception messages reach a dialog in some apps."),
+    "exempt": {
+        "raise_arguments": True,
+        "regex_patterns": True,
+        "user_agents": True,
+    },
+
+    "_translation_kwargs": (
+        "Keyword-argument names that carry the KEY when a translation call "
+        "is written t(key='nav.home') rather than t('nav.home')."),
+    "translation_kwargs": [],
+
+    "_extra_translation_calls": (
+        "Call names to treat as translation functions on top of the "
+        "built-ins — for wrappers, and for JS/TS factories such as "
+        "next-intl's useTranslations(), where the key is passed to what the "
+        "call RETURNS."),
+    "extra_translation_calls": [],
+
+    "_budgets": (
+        "Per-severity ceilings. Declaring one makes exceeding it a blocking "
+        "failure, which is the only way a count of hundreds ever comes "
+        "down. Left empty, the counts are informational."),
+    "budgets": {},
+}
+
+
+def _write_config_template() -> None:
+    """Drop a commented template next to the project, once.
+
+    Written rather than described in the docs because a file that does not
+    exist is a file nobody edits: the options below are discoverable only if
+    they are sitting in the repository. Every value in it is empty, so the
+    run it was created during behaves exactly as if it were still absent.
+
+    Never overwrites, and never fails the run: a read-only checkout or a CI
+    workspace simply says so and carries on with built-ins.
+    """
+    path = PROJECT_ROOT / PROJECT_VOCAB_FILE
+    try:
+        if path.exists():
+            return
+        path.write_text(
+            json.dumps(CONFIG_TEMPLATE, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8")
+        _config_state["created"] = True
+        print(L("cfg_created", file=PROJECT_VOCAB_FILE))
+    except Exception as exc:                                # noqa: BLE001
+        _config_state["error"] = str(exc)
+        print(L("cfg_uncreatable", file=PROJECT_VOCAB_FILE, err=exc))
+
+
+#: Directory whose configuration is in force, or None for the root's.
+#: Set around each file as it is scanned — see _config_scope.
+_active_config_dir = None
+#: dir -> the file's own contents (not merged). One read per directory.
+_dir_config_cache: Dict[str, dict] = {}
+
+
+def _load_config_at(directory) -> dict:
+    """The config file sitting in *directory* itself, or ``{}``."""
+    key = str(directory)
+    if key not in _dir_config_cache:
+        data: dict = {}
+        path = Path(directory) / PROJECT_VOCAB_FILE
+        try:
+            if path.is_file():
+                loaded = json.loads(path.read_text(encoding="utf-8-sig"))
+                if isinstance(loaded, dict):
+                    data = loaded
+        except Exception as exc:                            # noqa: BLE001
+            print(L("cfg_unreadable", file=str(path), err=exc))
+            _config_state["error"] = str(exc)
+        _dir_config_cache[key] = data
+    return _dir_config_cache[key]
+
+
+def _merge_config(base: dict, over: dict) -> dict:
+    """*over* on top of *base*, one key at a time.
+
+    Lists ADD rather than replace: a package declaring its own vocabulary
+    means "these as well", not "forget the root's". Objects merge key by
+    key, so switching one suppression off leaves the others alone.
+    Anything else — a number, a string — is simply the nearer answer.
+    """
+    out = dict(base)
+    for key, value in (over or {}).items():
+        if key.startswith("_"):
+            continue                     # the file's own documentation
+        prev = out.get(key)
+        if isinstance(prev, list) and isinstance(value, list):
+            seen = {json.dumps(v, sort_keys=True) for v in prev}
+            out[key] = prev + [v for v in value
+                               if json.dumps(v, sort_keys=True) not in seen]
+        elif isinstance(prev, dict) and isinstance(value, dict):
+            out[key] = {**prev, **value}
+        else:
+            out[key] = value
+    return out
+
+
+def _config_chain(directory) -> dict:
+    """Every config from PROJECT_ROOT down to *directory*, nearest winning.
+
+    A monorepo is many projects in one tree, and one file at the top cannot
+    describe them all: the web package's UI functions are not the CLI
+    package's, and a folder one of them vendors is not excluded for the
+    others. So each package answers for itself, and inherits everything it
+    does not mention.
+    """
+    try:
+        directory = Path(directory).resolve()
+        root = Path(PROJECT_ROOT).resolve()
+    except OSError:
+        return _load_config_at(PROJECT_ROOT)
+    if directory != root and root not in directory.parents:
+        return _load_config_at(PROJECT_ROOT)      # outside the tree
+    branch = [directory] + [p for p in directory.parents if p != root]
+    branch = [p for p in branch if p == root or root in p.parents]
+    merged = _load_config_at(root)
+    for part in reversed(branch):
+        if part == root:
+            continue
+        merged = _merge_config(merged, _load_config_at(part))
+    return merged
+
+
+class _config_scope:
+    """Put *path*'s package configuration in force for the block.
+
+    A context manager rather than an argument on nine helpers: the helpers
+    are called from deep inside the visitors, and threading a path through
+    all of them is how one of them ends up forgetting.
+    """
+
+    def __init__(self, path):
+        try:
+            p = Path(path)
+            self.directory = p if p.is_dir() else p.parent
+        except Exception:                                   # noqa: BLE001
+            self.directory = None
+
+    def __enter__(self):
+        global _active_config_dir
+        self.previous = _active_config_dir
+        _active_config_dir = self.directory
+        return self
+
+    def __exit__(self, *_exc):
+        global _active_config_dir
+        _active_config_dir = self.previous
+        return False
+
+
 def _project_config() -> dict:
-    """Parsed ``<PROJECT_ROOT>/.i18n-quality.json``, or ``{}``.
+    """The configuration in force: the nearest one, or the root's.
 
     Lazy for the same reason as the vocabulary: ``--root`` reassigns
     PROJECT_ROOT after this module is imported.
     """
     global _project_config_cache
+    if _active_config_dir is not None:
+        return _config_chain(_active_config_dir)
     if _project_config_cache is None:
         data: dict = {}
         try:
@@ -947,6 +1745,7 @@ def _project_config() -> dict:
                     data = loaded
             else:
                 _config_state["found"] = False
+                _write_config_template()
         except Exception as exc:
             # Said out loud, not swallowed: a configuration file that is
             # present but unreadable used to leave the run silently using
@@ -963,6 +1762,102 @@ def _project_config_list(key: str) -> Set[str]:
     if not isinstance(raw, list):
         return set()
     return {str(v).strip().lower() for v in raw if str(v).strip()}
+
+
+#: What each suppression is for, in the report's own words.
+_EXEMPT_KINDS = {
+    "raise_arguments": "ex_raise",
+    "regex_patterns": "ex_regex",
+    "user_agents": "ex_agent",
+}
+
+
+_RX_LOOKS_REGEX = re.compile(
+    r"\(\?P?[<:=!#]"          # (?P<name>  (?:  (?=  (?!  (?#
+    r"|\\[dwsbAZWSB]"          # \d \w \s \b \A \Z and their negations
+    r"|\[\^?[^\]]{0,40}\][*+?{]"  # a character class with a quantifier
+)
+
+
+def _looks_like_regex(text: str) -> bool:
+    """A pattern, not prose. Anchors alone are not enough on their own.
+
+    ``^`` and ``$`` appear in perfectly ordinary strings ("$5", "^ up"), so
+    an anchor only counts when the rest of the string also reads like a
+    pattern. Groups, escape classes and quantified character classes do
+    not occur in text meant for a person.
+    """
+    if not text:
+        return False
+    if _RX_LOOKS_REGEX.search(text):
+        return True
+    anchored = text.startswith("^") or text.endswith("$")
+    return anchored and any(c in text for c in "()[]|\\*+?")
+
+
+def _looks_like_user_agent(text: str) -> bool:
+    """``Name/1.0 (…)`` — a protocol header, never a label.
+
+    The shape is the whole test: a slash-separated version at the start,
+    which no interface string has.
+    """
+    return bool(re.match(r"^[A-Za-z][\w.-]{1,40}/\d[\w.]*(\s|$)", text or ""))
+
+
+def _exempt_flags() -> Dict[str, bool]:
+    """Which noise suppressions are on. All of them, unless told otherwise.
+
+    On by default because every one of these is noise in the overwhelming
+    majority of projects — but a project that puts exception text in front
+    of the user says so here rather than being quietly under-reported.
+    Whatever is suppressed is counted and named in the report either way.
+    """
+    raw = _project_config().get("exempt")
+    out = {k: True for k in _EXEMPT_KINDS}
+    if isinstance(raw, dict):
+        for key in out:
+            if isinstance(raw.get(key), bool):
+                out[key] = raw[key]
+    return out
+
+
+def _translation_kwargs() -> Set[str]:
+    """Keyword names that carry the key: ``t(key='nav.home')``.
+
+    The built-ins are the names the common libraries use; a wrapper with a
+    name of its own is declared in the project file.
+    """
+    raw = _project_config().get("translation_kwargs")
+    extra = ({str(v).strip() for v in raw if str(v).strip()}
+             if isinstance(raw, list) else set())
+    return {"key", "msgid", "message_id", "string_id", "id"} | extra
+
+
+def _extra_translation_calls() -> Set[str]:
+    """Project call names that are translation calls, or return one.
+
+    Two shapes at once, deliberately: a wrapper called like ``t()``, and a
+    FACTORY whose result is called with the key — next-intl's
+    ``useTranslations()('nav.home')``. Which one a name is need not be
+    declared, because trying both costs nothing and asking would be one
+    more thing to get wrong.
+    """
+    raw = _project_config().get("extra_translation_calls")
+    return ({str(v).strip() for v in raw if str(v).strip()}
+            if isinstance(raw, list) else set())
+
+
+def _excluded_dirs() -> Set[str]:
+    """Directories to skip: the universal ones plus this project's own.
+
+    Case-sensitive, because directory names are. ``_project_config_list``
+    lowercases (right for vocabulary, wrong for paths), so the project's
+    entries are read raw here.
+    """
+    raw = _project_config().get("exclude_dirs")
+    extra = ({str(v).strip() for v in raw if str(v).strip()}
+             if isinstance(raw, list) else set())
+    return PYTHON_EXCLUDES_BUILTIN | extra
 
 
 def _ui_funcs() -> Set[str]:
@@ -986,6 +1881,9 @@ _CONTEXT_SEVERITY = {
     # Argument to a call that puts text on screen — user-visible almost by
     # definition, and the reason this tool exists.
     'ui': 'high',
+    # Read from the tree: the string IS a JSX text node or the value of a
+    # placeholder=, established rather than guessed at.
+    'ast_ui': 'high',
     'regex_ui': 'high',
     # A label-shaped string handed to a function we do not know.
     'func_arg': 'medium',
@@ -1005,7 +1903,11 @@ def _project_budgets() -> Dict[str, int]:
     Absent means informational, exactly as before — a tool that starts
     failing builds the day it is upgraded would just be turned off.
     """
-    raw = _project_config().get("budgets")
+    # The root's, whatever package is in force: a budget is a ceiling on
+    # the whole run, and one counted per package would be a different
+    # feature — the totals it compares against are global.
+    with _config_scope(PROJECT_ROOT):
+        raw = _project_config().get("budgets")
     if not isinstance(raw, dict):
         return {}
     out: Dict[str, int] = {}
@@ -1199,7 +2101,7 @@ def _locale_search_dirs(root: Path) -> List[Path]:
         for child in children:
             if not child.is_dir():
                 continue
-            if child.name.startswith('.') or child.name in PYTHON_EXCLUDES:
+            if child.name.startswith('.') or child.name in _excluded_dirs():
                 continue
             found.append(child)
             frontier.append((child, depth + 1))
@@ -1227,7 +2129,7 @@ def _scan_dir_for_locales(parent: Path,
     except OSError:
         return
     for child in children:
-        if child.name.startswith('.') or child.name in PYTHON_EXCLUDES:
+        if child.name.startswith('.') or child.name in _excluded_dirs():
             continue
 
         if child.is_dir():
@@ -1389,6 +2291,11 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
     _IGNORE_METHODS = {
         # Logging
         'debug', 'info', 'warning', 'error', 'critical', 'exception',
+        # Environment. 'getenv' is in _IGNORE_FUNCS as well, and that is not
+        # a duplicate: nearly everyone writes os.getenv(...), which is an
+        # ATTRIBUTE call and never reached the function set — so every
+        # os.getenv("APPDATA", "") in a codebase came back as a label.
+        'getenv',
         # Styling / formatting
         'setStyleSheet', 'strftime', 'strptime', 'set_style', 'setObjectName',
         # OS / IO
@@ -1404,6 +2311,7 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
         self.hardcoded_strings: Set[Tuple[int, int, str]] = set()   # general context
         self.ui_context_strings: Set[Tuple[int, int, str]] = set()  # UI widget context
         self.func_arg_strings: Set[Tuple[int, int, str]] = set()    # unknown function arg context
+        self.raise_positions: Set[Tuple[int, int]] = set()          # inside a raise
         self.used_translation_keys: Set[str] = set()
         # Literal first-args of t()-family CALLS only — unlike
         # used_translation_keys this never mixes in dotted literals found
@@ -1454,8 +2362,35 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
             func_name = node.func.attr
 
         # ── i18n key extraction ──
-        if func_name in TRANSLATION_FUNCTIONS and node.args:
-            arg = node.args[0]
+        _is_t_call = (func_name in TRANSLATION_FUNCTIONS
+                      or func_name in _extra_translation_calls())
+        # t(key='nav.home') — the key is not node.args[0], and reading that
+        # slot regardless picked up whatever else happened to be positional.
+        if _is_t_call and not node.args:
+            _kwnames = _translation_kwargs()
+            for kw in node.keywords:
+                if kw.arg not in _kwnames:
+                    continue
+                if isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                    self.used_translation_keys.add(kw.value.value)
+                    self.t_call_keys.add(kw.value.value)
+                elif isinstance(kw.value, ast.JoinedStr):
+                    self._extract_dynamic_prefix(kw.value)
+        if _is_t_call and node.args:
+            for _slot in _key_positions(func_name)[1:]:
+                if _slot < len(node.args):
+                    _extra = node.args[_slot]
+                    if (isinstance(_extra, ast.Constant)
+                            and isinstance(_extra.value, str)):
+                        self.used_translation_keys.add(_extra.value)
+                        self.t_call_keys.add(_extra.value)
+                    elif isinstance(_extra, ast.JoinedStr):
+                        self._extract_dynamic_prefix(_extra)
+            _first = _key_positions(func_name)[0]
+            if _first >= len(node.args):
+                self.generic_visit(node)
+                return
+            arg = node.args[_first]
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                 self.used_translation_keys.add(arg.value)
                 self.t_call_keys.add(arg.value)
@@ -1502,7 +2437,7 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
             return
 
         # ── Unknown function — collect positional string args as func-arg context ──
-        if func_name and func_name not in TRANSLATION_FUNCTIONS:
+        if func_name and not _is_t_call:
             for arg in node.args:
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                     self.func_arg_strings.add((*self._pos(arg, node.lineno), arg.value))
@@ -1555,6 +2490,23 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
         prefix = "".join(parts)
         if prefix:
             self.dynamic_key_prefixes.add(prefix)
+
+    def visit_Raise(self, node):
+        """Positions of every string this ``raise`` carries.
+
+        Not dropped here — the strings are still collected, and the caller
+        decides. That keeps the suppression countable and reversible
+        instead of a hole nothing can see: a project whose exception text
+        reaches a dialog turns it off and gets its findings back.
+        """
+        for child in ast.walk(node):
+            if isinstance(child, ast.Constant) and isinstance(child.value, str):
+                self.raise_positions.add(self._pos(child, node.lineno))
+            elif isinstance(child, ast.JoinedStr):
+                for val in child.values:
+                    if isinstance(val, ast.Constant) and isinstance(val.value, str):
+                        self.raise_positions.add(self._pos(val, node.lineno))
+        self.generic_visit(node)
 
     def visit_Constant(self, node):
         if isinstance(node.value, str):
@@ -1858,6 +2810,11 @@ class UniversalQualityAnalyzer:
         self.all_used_code_keys: Set[str] = set()
         self.all_t_call_keys: Set[str] = set()
         self.all_dynamic_prefixes: Set[str] = set()
+        # kind -> how many findings that suppression held back. Reported,
+        # never silent: see _exempt_flags.
+        self.exempt_counts: Dict[str, int] = {}
+        # context -> how many files that tier answered for.
+        self.text_backends: Dict[str, int] = {}
         self.detected_format: str = ""
 
     # ── Loading ──────────────────────────────────────────────────────────────
@@ -2225,7 +3182,14 @@ class UniversalQualityAnalyzer:
         n_py = n_other = 0
         _EXTRACTION_BACKENDS.clear()
         for root, dirs, files in os.walk(PROJECT_ROOT):
-            dirs[:] = [d for d in dirs if d not in PYTHON_EXCLUDES and not d.startswith('.')]
+            # This directory's own configuration decides what is pruned
+            # under it, and what counts as vocabulary or a UI widget in the
+            # files it holds — see _config_scope. In a single-root project
+            # there is one config and this changes nothing.
+            with _config_scope(root):
+                _skip = _excluded_dirs()
+            dirs[:] = [d for d in dirs
+                       if d not in _skip and not d.startswith('.')]
             for fname in files:
                 ext = Path(fname).suffix.lower()
                 fpath = Path(root) / fname
@@ -2241,17 +3205,28 @@ class UniversalQualityAnalyzer:
                     if '.min.' in fname.lower() or _looks_generated(_src):
                         continue
                     try:
+                      with _config_scope(fpath):
                         _keys, _prefixes = _extract_keys(_src, ext)
                         self.all_used_code_keys.update(_keys)
                         self.all_t_call_keys.update(_keys)
                         self.all_dynamic_prefixes.update(_prefixes)
                         _rel = str(fpath.relative_to(PROJECT_ROOT))
                         _other_lines = _src.splitlines()
-                        for _lineno, _col, _text in _extract_hardcoded_regex(_src, ext):
+                        # The tree when it can answer, the regex when it
+                        # cannot. Which one answered is recorded per file,
+                        # because "hint" and "read from the syntax" are not
+                        # the same claim and the report says which.
+                        _ast_hits = _extract_hardcoded_ast(_src, ext)
+                        _ctx = 'ast_ui' if _ast_hits is not None else 'regex_ui'
+                        _hits = (_ast_hits if _ast_hits is not None
+                                 else _extract_hardcoded_regex(_src, ext))
+                        self.text_backends[_ctx] = (
+                            self.text_backends.get(_ctx, 0) + 1)
+                        for _lineno, _col, _text in _hits:
                             self.results['hardcoded'].append({
                                 'file': _rel, 'line': _lineno, 'col': _col,
-                                'text': _text, 'context': 'regex_ui',
-                                'severity': _severity_for('regex_ui'),
+                                'text': _text, 'context': _ctx,
+                                'severity': _severity_for(_ctx),
                                 'preview': _preview(_other_lines, _lineno)})
                         n_other += 1
                     except Exception:
@@ -2261,7 +3236,9 @@ class UniversalQualityAnalyzer:
                     continue
                 n_py += 1
                 rel = fpath.relative_to(PROJECT_ROOT)
+                _scope = _config_scope(fpath)
                 try:
+                    _scope.__enter__()
                     src = fpath.read_text(encoding='utf-8')
                     src_lines = src.splitlines()
 
@@ -2295,12 +3272,33 @@ class UniversalQualityAnalyzer:
                                     'severity': _severity_for('ui'),
                                     'preview': _preview(src_lines, lineno)})
 
+                    # Known noise, held back rather than dropped: what is
+                    # skipped here is counted by kind and named in the
+                    # report, and any kind can be switched back on. A silent
+                    # filter would read as "nothing to see" for a project
+                    # that does put this text in front of the user.
+                    _flags = _exempt_flags()
+
+                    def _exempt(lineno, col, text) -> bool:
+                        if _flags["raise_arguments"] and (lineno, col) in ana.raise_positions:
+                            kind = "raise_arguments"
+                        elif _flags["regex_patterns"] and _looks_like_regex(text):
+                            kind = "regex_patterns"
+                        elif _flags["user_agents"] and _looks_like_user_agent(text):
+                            kind = "user_agents"
+                        else:
+                            return False
+                        self.exempt_counts[kind] = self.exempt_counts.get(kind, 0) + 1
+                        return True
+
                     # Tier 2: Function-arg strings — ALL-CAPS labels passed to unknown functions
                     for lineno, col, text in ana.func_arg_strings:
                         if _suppressed(lineno):
                             continue
                         key = (str(rel), lineno, text)
                         if key not in seen and self._is_func_arg_label(text):
+                            if _exempt(lineno, col, text):
+                                continue
                             seen.add(key)
                             self.results['hardcoded'].append({
                                 'file': str(rel), 'line': lineno, 'col': col,
@@ -2314,6 +3312,8 @@ class UniversalQualityAnalyzer:
                             continue
                         key = (str(rel), lineno, text)
                         if key not in seen and self._is_ui_string(text):
+                            if _exempt(lineno, col, text):
+                                continue
                             seen.add(key)
                             self.results['hardcoded'].append({
                                 'file': str(rel), 'line': lineno, 'col': col,
@@ -2322,7 +3322,16 @@ class UniversalQualityAnalyzer:
                                 'preview': _preview(src_lines, lineno)})
                 except Exception:
                     pass
+                finally:
+                    _scope.__exit__(None, None, None)
         print(L("scan_summary", py=n_py, other=n_other))
+        if self.exempt_counts:
+            print(L("exempt_note",
+                    n=sum(self.exempt_counts.values()),
+                    detail=", ".join(
+                        f"{n} {L(_EXEMPT_KINDS[k])}"
+                        for k, n in sorted(self.exempt_counts.items())),
+                    file=PROJECT_VOCAB_FILE))
         if _EXTRACTION_BACKENDS:
             used = sorted(set(_EXTRACTION_BACKENDS.values()))
             exts = ", ".join(sorted(_EXTRACTION_BACKENDS))
@@ -2811,6 +3820,13 @@ class UniversalQualityAnalyzer:
                 f.write(f"| {name} | {n} | {st} | {sev} |\n")
             f.write("\n")
 
+            if self.exempt_counts:
+                f.write(L("r_exempt_h", file=PROJECT_VOCAB_FILE))
+                for kind, n in sorted(self.exempt_counts.items()):
+                    f.write(L("r_exempt_row", kind=kind, n=n,
+                              why=L(_EXEMPT_KINDS[kind])))
+                f.write("\n")
+
             if self.results['unresolved_code_keys']:
                 f.write(L("r_unresolved_h"))
                 for k in self.results['unresolved_code_keys']:
@@ -2822,6 +3838,7 @@ class UniversalQualityAnalyzer:
                     ('ui', L("tier_ui_t"), L("tier_ui_d")),
                     ('func_arg', L("tier_func_t"), L("tier_func_d")),
                     ('general', L("tier_gen_t"), L("tier_gen_d")),
+                    ('ast_ui', L("tier_ast_t"), L("tier_ast_d")),
                     ('regex_ui', L("tier_rx_t"), L("tier_rx_d")),
                 ]
                 for ctx, title, desc in tiers:
@@ -2947,7 +3964,10 @@ _SELF_TEST_FILES = {
 }""",
     ".i18n-quality.json": """{
   "tech_words": ["acmecloud", "widgetdrive"],
-  "ui_functions": ["HouseLabel"]
+  "ui_functions": ["HouseLabel"],
+  "exclude_dirs": ["vendored"],
+  "translation_kwargs": ["msg_key"],
+  "extra_translation_calls": ["houseT"]
 }""",
     "app.py": '''
 from i18n import t
@@ -2960,6 +3980,44 @@ def build(ui):
     cfg = {}
     cfg.get("Config lookup value")                   # method ignore: not a finding
     HouseLabel("Custom widget text")                 # project ui_functions -> high
+    ui.setText(pgettext("menu bar", "app.title"))    # key is arg 1, not arg 0
+    ui.setText(ngettext("app.save", "app.title", n)) # BOTH are keys
+    ui.setText(t(key="app.save"))                    # key by KEYWORD, not position
+    ui.setText(t(msg_key="app.title"))               # project's own kwarg name
+    ui.setText(houseT("app.save"))                   # project's own call name
+    import os
+    os.getenv("APPDATA", "")                         # env read, not a label
+    # A custom class on purpose: RuntimeError and friends were already
+    # ignored by name, so only a project's OWN exception exercises this.
+    raise HouseError("The archive could not be opened for reading")
+''',
+    # A folder the project excluded. Everything in it is planted to be
+    # found, so if any of it turns up the exclusion did not happen.
+    "vendored/skipped.py": '''
+def build(ui):
+    ui.setText("This vendored string must never be reported")
+''',
+    # A monorepo package that answers for itself: its own widget name, its
+    # own excluded folder, and everything it does not mention inherited
+    # from the root above it.
+    "packages/web/.i18n-quality.json": """{
+  "ui_functions": ["WebLabel"],
+  "exclude_dirs": ["generated"]
+}""",
+    "packages/web/page.py": '''
+def build(ui):
+    WebLabel("Package widget text")                  # the PACKAGE's widget
+    HouseLabel("Inherited widget text")              # the ROOT's, still known
+''',
+    "packages/web/generated/build.py": '''
+def build(ui):
+    ui.setText("This generated string must never be reported")
+''',
+    # A sibling package that declares nothing. The web package's widget must
+    # not be known here, or the configuration was global after all.
+    "packages/cli/main.py": '''
+def build(ui):
+    WebLabel("Sibling package text")
 ''',
     # Non-Python sources: the regex tier had no coverage here at all, which
     # is how a text node indented under its tag kept being reported on the
@@ -2985,11 +4043,82 @@ def get(label):                                      # a FUNCTION named get
 
 def build():
     return get("Plain function argument text")       # planted: not suppressed
+
+_UA = "HouseApp/2.1 (integration probe)"             # user-agent, not a label
+_RX = r"^(?P<head>[A-Za-z_][\\w .-]*)\\s*[=:]"          # a pattern, not prose
 ''',
 }
 
 # (case id, description, predicate over the finished analyzer)
 _SELF_TEST_CASES = [
+    ("package_ui_function",
+     "a package's own ui_functions apply inside that package",
+     lambda a: any(i['text'] == "Package widget text" and i['severity'] == 'high'
+                   for i in a.results['hardcoded'])),
+    ("package_inherits_the_root",
+     "and what it does not mention is inherited from the root above it",
+     lambda a: any(i['text'] == "Inherited widget text" and i['severity'] == 'high'
+                   for i in a.results['hardcoded'])),
+    ("package_exclude_dirs",
+     "a folder excluded by the package is skipped under it",
+     lambda a: not any("generated" in str(i['file'])
+                       for i in a.results['hardcoded'])),
+    ("package_config_does_not_leak",
+     "and the package's widget is unknown in a sibling that never declared it",
+     lambda a: not any(i['text'] == "Sibling package text"
+                       and i['severity'] == 'high'
+                       for i in a.results['hardcoded'])),
+    ("root_exclude_still_applies",
+     "the root's own excludes keep working with packages in the tree",
+     lambda a: not any("vendored" in str(i['file'])
+                       for i in a.results['hardcoded'])),
+    ("pgettext_key_position",
+     "pgettext's key is its SECOND argument; the first is a context",
+     lambda a: "app.title" in a.all_t_call_keys),
+    ("pgettext_context_is_not_a_key",
+     "and the context is not filed as one, where it would mask an orphan",
+     lambda a: "menu bar" not in a.all_t_call_keys),
+    ("ngettext_both_forms",
+     "ngettext carries a key in each of its first two arguments",
+     lambda a: {"app.save", "app.title"} <= a.all_t_call_keys),
+    ("key_by_keyword",
+     "t(key='app.save') registers the key, not just t('app.save')",
+     lambda a: "app.save" in a.all_t_call_keys),
+    ("key_by_project_keyword",
+     "and a keyword name the project declared works the same way",
+     lambda a: "app.title" in a.all_t_call_keys),
+    ("project_translation_call",
+     "a call name from extra_translation_calls counts as a translation call",
+     lambda a: "app.save" in a.all_t_call_keys
+               and not any(i['text'] == "app.save"
+                           for i in a.results['hardcoded'])),
+    ("exclude_dirs_honoured",
+     "a directory named in exclude_dirs is not scanned at all",
+     lambda a: not any("vendored" in str(i['file'])
+                       for i in a.results['hardcoded'])),
+    ("getenv_is_not_a_label",
+     "os.getenv('APPDATA') is an environment read, not a heading",
+     lambda a: not any(i['text'] == "APPDATA"
+                       for i in a.results['hardcoded'])),
+    ("raise_message_exempt",
+     "an exception message is held back, not reported",
+     lambda a: not any(i['text'].startswith("The archive could not be opened")
+                       for i in a.results['hardcoded'])),
+    ("raise_exemption_is_counted",
+     "and it is counted by kind rather than dropped in silence",
+     lambda a: a.exempt_counts.get("raise_arguments", 0) >= 1),
+    ("user_agent_exempt",
+     "a User-Agent string is held back and counted",
+     lambda a: a.exempt_counts.get("user_agents", 0) >= 1
+               and not any(i['text'].startswith("HouseApp/2.1")
+                           for i in a.results['hardcoded'])),
+    ("regex_exempt",
+     "so is a regular expression",
+     lambda a: a.exempt_counts.get("regex_patterns", 0) >= 1),
+    ("real_text_still_found",
+     "and none of that quietened a string that IS user-facing",
+     lambda a: any(i['text'] == "Save your progress now"
+                   for i in a.results['hardcoded'])),
     ("ui_hardcoded",
      "a string passed to a UI setter is found at high severity",
      lambda a: any(i['text'] == "Save your progress now" and i['severity'] == 'high'
@@ -3078,11 +4207,13 @@ _SELF_TEST_FILES_JS = {
 export const translations = {
   it: {
     save: "Salva",
+    nav: { home: "Pagina iniziale" },
     // un commento fra le chiavi
     onlyItalian: "Presente solo in italiano",
   },
   en: {
     save: "Save",
+    nav: { home: "Home page" },
     leftInItalian: "Il totale include promo e sconti applicati al carrello",
     shortEnglish: "Promo professional price (total lot)",
   },
@@ -3095,6 +4226,7 @@ export default function App() {
       <span>Hardcoded label here</span>
       {items.length > 0 && depth < maxDepth ? <A /> : <B />}
       <button title={t('save')}>{t('save')}</button>
+      <p>{useTranslations()('nav.home')}</p>
     </div>
   );
 }
@@ -3114,6 +4246,12 @@ _SELF_TEST_CASES_JS = [
      "a key present in one language and absent in the other is reported",
      lambda a: any(r['missing_key'] == "onlyItalian"
                    for r in a.results['missing_keys'])),
+    ("js_factory_call",
+     "a key passed to what a factory returns — useTranslations()('k') — is a use",
+     lambda a: "nav.home" in a.all_t_call_keys),
+    ("js_factory_key_not_orphan",
+     "so the key it names is not reported as unreferenced",
+     lambda a: "nav.home" not in a.results['orphan_keys']),
     ("js_hardcoded_found",
      "hardcoded JSX text is still reported",
      lambda a: any(i['text'] == "Hardcoded label here"
@@ -3306,13 +4444,19 @@ _SELF_TEST_CASES_ICU = [
 _SELF_TEST_FILES_EXTRACT = {
     "locales/en.json": """{
   "real": {"one": "First", "two": "Second"},
-  "vue": {"hello": "Hello"},
-  "php": {"key": "Key"}
+  "vue": {"hello": "Hello", "script": "From the script block"},
+  "php": {"key": "Key"},
+  "qml": {"label": "Label"},
+  "objc": {"title": "Title"},
+  "lua": {"name": "Name"}
 }""",
     "locales/it.json": """{
   "real": {"one": "Primo", "two": "Secondo"},
-  "vue": {"hello": "Ciao"},
-  "php": {"key": "Chiave"}
+  "vue": {"hello": "Ciao", "script": "Dal blocco script"},
+  "php": {"key": "Chiave"},
+  "qml": {"label": "Etichetta"},
+  "objc": {"title": "Titolo"},
+  "lua": {"name": "Nome"}
 }""",
     "app.js": '''
 const good = t("real.one");
@@ -3320,9 +4464,54 @@ const doc = "call it with t('ghost.in_a_string') if you like";
 const mid = compute();   // t("ghost.in_a_comment") left from the rewrite
 const tpl = t(`real.${which}`);
 ''',
-    "widget.vue": """<template><p>{{ $t("vue.hello") }}</p></template>""",
-    "helper.php": """<?php echo __("php.key"); ?>""",
+    "widget.vue": """<template><p>{{ $t("vue.hello") }}</p></template>
+<script>
+export default {
+  mounted() {
+    this.$t("vue.script");
+    const doc = "t('ghost.in_vue_script')";
+  }
+}
+</script>""",
+    "helper.php": """<?php
+echo __("php.key");
+function warn() { alert("The invoice is already issued"); }
+""",
+    # Argument shapes that differ from the JS family and were all missed
+    # until the containers were read off the grammars: PHP and C# wrap each
+    # argument in a node of its own, Kotlin and Swift hide them behind a
+    # call_suffix, Dart has no call node at all.
+    "Screen.kt": """fun warn() { alert("The warehouse is locked") }""",
+    "Screen.cs": """class A { void W() { alert("The customer was not found"); } }""",
+    "screen.dart": """void warn() { alert('No table has been selected'); }""",
+    # Qt translates through qsTr and nothing else. Without it a .qml file
+    # came back empty from BOTH backends, which reads as "no keys here".
+    "panel.qml": """import QtQuick 2.0
+Text { text: qsTr("qml.label") }""",
+    # Objective-C puts an @ in front of the opening quote, so the quote is
+    # not the first character after the bracket.
+    "View.m": """NSString *a = NSLocalizedString(@"objc.title", nil);""",
+    # A language added after the grammar was measured, not before.
+    "mod.lua": """local label = t('lua.name')""",
     "extra.js": '''export const x = t("real.two");''',
+    # The parsed hardcoded tier. Every string here is planted to be found
+    # or planted to be ignored, and which one it is depends on where the
+    # SYNTAX puts it, not on how it reads.
+    "Panel.jsx": '''
+import helper from "./some/module/path.js";
+const config = { "notAVisibleLabel": 1 };
+export default function Panel({ n }) {
+  return (
+    <div className="only-a-css-class">
+      Plain visible sentence here
+      <input placeholder="Type the customer name" />
+      <span>Total for {n} nights</span>
+      <button>Next &gt;</button>
+      <b>{t("real.one")}</b>
+    </div>
+  );
+}
+''',
 }
 
 
@@ -3344,6 +4533,80 @@ _SELF_TEST_CASES_EXTRACT = [
     ("extract_php_key",
      "PHP keys survive for the same reason",
      lambda a: "php.key" in a.all_used_code_keys),
+    ("ast_arg_wrapper_php",
+     "PHP wraps each argument in a node; the string inside is still text",
+     lambda a: any(i['text'].startswith("The invoice is already")
+                   for i in a.results['hardcoded'])
+               or _extract_backend() == "regex"),
+    ("ast_call_suffix_kotlin",
+     "Kotlin hides its arguments behind a call_suffix",
+     lambda a: any(i['text'].startswith("The warehouse is locked")
+                   for i in a.results['hardcoded'])
+               or _extract_backend() == "regex"),
+    ("ast_arg_list_csharp",
+     "C# wraps them too, in an argument_list of arguments",
+     lambda a: any(i['text'].startswith("The customer was not found")
+                   for i in a.results['hardcoded'])
+               or _extract_backend() == "regex"),
+    ("ast_dart_has_no_call_node",
+     "and Dart has no call node: an identifier and a selector, side by side",
+     lambda a: any(i['text'].startswith("No table has been selected")
+                   for i in a.results['hardcoded'])
+               or _extract_backend() == "regex"),
+    ("ast_text_node_found",
+     "a JSX text node is user-facing text and is reported",
+     lambda a: any(i['text'] == "Plain visible sentence here"
+                   for i in a.results['hardcoded'])),
+    ("ast_ui_attribute_found",
+     "so is the value of a placeholder=",
+     lambda a: any(i['text'] == "Type the customer name"
+                   for i in a.results['hardcoded'])),
+    ("ast_sentence_is_not_split",
+     "a sentence broken by an interpolation is reported whole, once",
+     lambda a: any(i['text'] == "Total for {…} nights"
+                   for i in a.results['hardcoded'])
+               or _extract_backend() == "regex"),
+    ("ast_entity_is_part_of_the_label",
+     "an HTML entity belongs to the text beside it: Next &gt; is two words",
+     lambda a: any(i['text'] == "Next >" for i in a.results['hardcoded'])
+               or _extract_backend() == "regex"),
+    ("ast_import_path_ignored",
+     "an import path is structure, not text",
+     lambda a: not any("some/module/path" in i['text']
+                       for i in a.results['hardcoded'])),
+    ("ast_object_key_ignored",
+     "and neither is the key half of an object entry",
+     lambda a: not any(i['text'] == "notAVisibleLabel"
+                       for i in a.results['hardcoded'])),
+    ("ast_css_class_ignored",
+     "className is not a UI attribute, whatever it contains",
+     lambda a: not any(i['text'] == "only-a-css-class"
+                       for i in a.results['hardcoded'])),
+    ("ast_translated_call_ignored",
+     "and a string already going through t() is not a finding",
+     lambda a: not any(i['text'] == "real.one"
+                       for i in a.results['hardcoded'])),
+    ("ast_tier_is_labelled",
+     "the parsed tier says so, rather than borrowing the hint tier's name",
+     lambda a: (any(i.get('context') == 'ast_ui'
+                    for i in a.results['hardcoded'])
+                or _extract_backend() == "regex")),
+    ("extract_objc_prefixed_string",
+     "an Objective-C @\"key\" is read despite the prefix before the quote",
+     lambda a: "objc.title" in a.all_used_code_keys),
+    ("extract_lua_key",
+     "and a language added later is read like any other",
+     lambda a: "lua.name" in a.all_used_code_keys),
+    ("extract_qml_key",
+     "qsTr is how Qt translates, so a .qml key is found at all",
+     lambda a: "qml.label" in a.all_used_code_keys),
+    ("extract_sfc_script_key",
+     "a key inside a single-file component's <script> is found",
+     lambda a: "vue.script" in a.all_used_code_keys),
+    ("extract_sfc_script_string",
+     "and a call written inside a STRING in that script is not a use",
+     lambda a: ("ghost.in_vue_script" not in a.all_used_code_keys)
+               or _extract_backend() == "regex"),
     ("extract_second_file",
      "every non-Python file is read, not just the first",
      lambda a: "real.two" in a.all_used_code_keys),
@@ -3391,6 +4654,7 @@ def _analyse_fixture(files: dict):
 
         saved_root, saved_cfg = PROJECT_ROOT, _project_config_cache
         PROJECT_ROOT, _project_config_cache = root, None
+        _dir_config_cache.clear()
         analyzer = UniversalQualityAnalyzer(report_path=root / "report.md")
         try:
             # The synthetic project is SUPPOSED to fail: run_all_tests exits
@@ -3412,6 +4676,7 @@ def _analyse_fixture(files: dict):
             }
         finally:
             PROJECT_ROOT, _project_config_cache = saved_root, saved_cfg
+            _dir_config_cache.clear()
     return analyzer
 
 
@@ -3530,15 +4795,39 @@ if __name__ == '__main__':
         raise SystemExit(_run_self_test())
     if _args.vocab_help:
         print(
-            f"{PROJECT_VOCAB_FILE} — optional, in the scanned project root "
-            f"(or --root).\n\n"
-            "The mixed-language check reports strings that look like they were "
-            "left in\nthe wrong language. Brand, vendor, engine and site names "
-            "are spelled the\nsame in every locale, so they must not count as "
-            "evidence. This tool ships\nonly cross-project vocabulary (api, "
-            "json, url, token, …); a project declares\nits own here:\n\n"
-            '  { "tech_words": ["acme", "postgres", "unreal", "steam"] }\n\n'
-            "Absent or malformed: ignored silently, built-ins only.")
+              PROJECT_VOCAB_FILE + " — optional, in the scanned project root (or --root). Written\n"
+              "for you the first time it is missing, with every value empty: it\n"
+              "changes nothing until you fill something in, and deleting it is fine.\n"
+              "\n"
+              "Everything project-specific lives here, so the analyzer itself stays\n"
+              "project-agnostic:\n"
+              "\n"
+              "  tech_words               brand, vendor and engine names, so the\n"
+              "                           mixed-language check stops reading them as\n"
+              "                           the wrong language\n"
+              "  ui_functions             house widget names whose string arguments\n"
+              "                           reach the screen, so they are judged at\n"
+              "                           high severity\n"
+              "  exclude_dirs             directories to skip on top of caches,\n"
+              "                           virtualenvs and build output — vendored\n"
+              "                           copies, dev-only scripts, old sources\n"
+              "  exempt                   which noise suppressions are on (exception\n"
+              "                           messages, regular expressions, User-Agent\n"
+              "                           strings). Whatever is suppressed is counted\n"
+              "                           and named in the report either way\n"
+              "  translation_kwargs       keyword names that carry the key, as in\n"
+              "                           t(key='nav.home')\n"
+              "  extra_translation_calls  your own translation call names, and\n"
+              "                           factories whose RESULT takes the key —\n"
+              "                           useTranslations()('nav.home')\n"
+              "  budgets                  per-severity ceilings; declaring one makes\n"
+              "                           exceeding it blocking, which is how a count\n"
+              "                           of hundreds ever comes down\n"
+              "\n"
+              "  { \"tech_words\": [\"acme\", \"postgres\"], \"exclude_dirs\": [\"vendor\"] }\n"
+              "\n"
+              "Present but unreadable is said out loud, not swallowed."
+              )
         raise SystemExit(0)
     if _args.export_lang_template:
         _code = _args.export_lang_template.strip().lower()
