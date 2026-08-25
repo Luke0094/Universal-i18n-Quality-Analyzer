@@ -99,6 +99,18 @@ _L10N = {
     "scan_summary":   {"en": "   scanned: {py} Python file(s) [AST, full analysis] + {other} other-language file(s) [regex, key extraction]",
                         "it": "   analizzati: {py} file Python [AST, analisi completa] + {other} file in altri linguaggi [regex, estrazione chiavi]"},
     "an_missing":     {"en": "📊 MISSING KEYS ANALYSIS...", "it": "📊 ANALISI CHIAVI MANCANTI..."},
+    "an_member":      {"en": "🔗 KEYS READ AS OBJECT PROPERTIES (t.key)...",
+                       "it": "🔗 ANALISI CHIAVI LETTE COME PROPRIETA' (t.chiave)..."},
+    "member_off":     {"en": "   ℹ️ not configured — declare \"member_access_objects\" in .i18n-quality.json to enable",
+                       "it": "   ℹ️ non configurato — dichiara \"member_access_objects\" in .i18n-quality.json per attivarlo"},
+    "member_bad":     {"en": "   ❌ {n} key(s) read WITHOUT a fallback and absent from every locale (they render as \"undefined\"):",
+                       "it": "   ❌ {n} chiave/i lette SENZA fallback e assenti da ogni lingua (a schermo escono come \"undefined\"):"},
+    "member_fb":      {"en": "   ⚠️ {n} key(s) absent from every locale but always read with a fallback (the fallback text is hardcoded)",
+                       "it": "   ⚠️ {n} chiave/i assenti da ogni lingua ma sempre lette con un fallback (il testo di ripiego e' scritto nel codice)"},
+    "member_ok":      {"en": "   🟢 every key read as a property exists in the locales",
+                       "it": "   🟢 ogni chiave letta come proprieta' esiste nei locale"},
+    "member_seen":    {"en": "   ℹ️ {n} property reads scanned on: {o}",
+                       "it": "   ℹ️ {n} letture di proprieta' analizzate su: {o}"},
     "an_unresolved":  {"en": "🧩 KEYS USED IN CODE BUT NOT DEFINED...",
                         "it": "🧩 ANALISI CHIAVI USATE NEL CODICE MA NON DEFINITE..."},
     "unresolved_bad": {"en": "   ❌ {n} key(s) called with t() but absent from EVERY locale:",
@@ -121,6 +133,8 @@ _L10N = {
     # blocking-failure summaries
     "fail_missing":    {"en": "{n} missing translation key(s): {items}",
                          "it": "{n} chiave/i di traduzione mancanti: {items}"},
+    "fail_member": {"en": "{n} key(s) read as t.key without a fallback and defined in NO locale (they render as \"undefined\"): {items}",
+                    "it": "{n} chiave/i lette come t.chiave senza fallback e non definite in NESSUNA lingua (a schermo escono come \"undefined\"): {items}"},
     "fail_unresolved": {"en": "{n} key(s) used in code but defined in NO locale (they render as raw keys in the UI): {items}",
                          "it": "{n} chiave/i usate nel codice ma definite in NESSUN locale (in UI appaiono come chiave grezza): {items}"},
     "fail_empty":      {"en": "{n} empty translation value(s): {items}",
@@ -138,6 +152,10 @@ _L10N = {
                         "it": "| Categoria | Problemi | Stato | Gravità |\n|-----------|----------|-------|---------|\n"},
     "cat_dups":       {"en": "Duplicate JSON keys (same level)", "it": "JSON Duplicati (stesso livello)"},
     "cat_vars":       {"en": "Broken variables (placeholders)", "it": "Variabili Rotte (Placeholder)"},
+    "cat_member": {"en": "Property keys, no fallback, undefined",
+                   "it": "Chiavi proprieta' senza fallback, non definite"},
+    "cat_member_fb": {"en": "Property keys covered only by a fallback",
+                      "it": "Chiavi proprieta' coperte solo dal fallback"},
     "cat_unresolved": {"en": "Keys used but not defined", "it": "Chiavi Usate ma Non Definite"},
     "cat_empty":      {"en": "Empty values", "it": "Valori Vuoti"},
     "cat_missing":    {"en": "Missing keys", "it": "Chiavi Mancanti"},
@@ -291,6 +309,12 @@ _L10N = {
                              "(budget {max})",
                         "it": "testi hardcoded di gravità {level}: {n} "
                              "(budget {max})"},
+    "r_member_h": {"en": "## 🔗 Keys read as object properties (t.key)\n> Read off the catalogue object instead of passed to t(). Without a fallback a missing key reaches the screen as the string \"undefined\".\n\n",
+                   "it": "## 🔗 Chiavi lette come proprieta' dell'oggetto (t.chiave)\n> Lette dall'oggetto catalogo invece che passate a t(). Senza fallback una chiave mancante arriva a schermo come la stringa \"undefined\".\n\n"},
+    "r_member_bad": {"en": "### ❌ Missing, no fallback — they render as \"undefined\"\n",
+                     "it": "### ❌ Mancanti, senza fallback — escono come \"undefined\"\n"},
+    "r_member_fb": {"en": "### ⚠️ Missing, but always read with a fallback\n> Harmless on screen; the fallback text lives in the code and is usually untranslated.\n",
+                    "it": "### ⚠️ Mancanti, ma sempre lette con un fallback\n> Innocue a schermo; il testo di ripiego sta nel codice ed e' di solito non tradotto.\n"},
     "r_unresolved_h": {"en": "## 🧩 Keys used in code but not defined\n> Passed literally to a t()-family call, absent from every locale — they render as raw keys in the UI.\n\n",
                         "it": "## 🧩 Chiavi usate nel codice ma non definite\n> Passate letteralmente a una chiamata t(), assenti da ogni locale — in UI appaiono come chiave grezza.\n\n"},
     "r_missing_h":    {"en": "## 🔑 Missing keys\n", "it": "## 🔑 Chiavi Mancanti\n"},
@@ -1051,6 +1075,284 @@ def _extract_keys_ast(src: str, ext: str):
         if not quoted(match.start()):
             prefixes.add(match.group(1))
     return keys, prefixes
+
+
+# ── Catalogue read as an OBJECT: `t.someKey` ────────────────────────────────
+# Some projects never call t('key'): they hand the whole catalogue around as
+# an object and read properties off it. Every call-shaped pattern above is
+# blind to that — the key is never a string literal, so there is nothing to
+# capture — and the tool would report "every key used in code exists" while
+# seeing no usage at all. Enabled per project through
+# ``member_access_objects`` in the project file, because guessing which
+# single-letter identifiers are catalogues would be worse than asking.
+#
+# Two things make the finding useful rather than noisy:
+#
+#   1. SHADOWING. `t` is also the conventional name for a loop variable
+#      (``tiers.filter(t => t.threshold > 0)``). Those property reads are not
+#      translations. When a parse tree is available the identifier is
+#      resolved against the enclosing function parameters and local
+#      declarations, so a shadowed `t` is skipped — this is the reason the
+#      tree path exists here at all.
+#
+#   2. THE FALLBACK IDIOM. ``t.qty || "Qta"`` still renders something when
+#      the key is missing; ``t.qty`` alone renders the string "undefined" on
+#      screen. The same missing key is therefore two different problems, and
+#      they are reported apart: no fallback is blocking, fallback-only is
+#      informational (the fallback text is hardcoded, usually untranslated).
+
+# Flat identifiers: this style has no dotted namespace, so _KEY_PATTERN —
+# which REQUIRES a separator and rejects capitals — would discard every one.
+_MEMBER_KEY_PATTERN = re.compile(r'^[A-Za-z][A-Za-z0-9_]*$')
+
+# Property names that are never catalogue keys: they belong to the objects a
+# shadowed loop variable would carry, and to JS itself.
+_MEMBER_KEY_STOPWORDS = frozenset((
+    'length', 'name', 'value', 'type', 'id', 'key', 'map', 'filter', 'find',
+    'forEach', 'reduce', 'push', 'slice', 'split', 'join', 'trim', 'toString',
+    'then', 'catch', 'call', 'apply', 'bind', 'prototype', 'constructor',
+    'default', 'current', 'props', 'state', 'children',
+))
+
+_TS_FUNC_TYPES = frozenset((
+    'arrow_function', 'function_declaration', 'function_expression',
+    'function', 'method_definition', 'generator_function',
+    'generator_function_declaration',
+))
+
+
+def _member_access_objects() -> Set[str]:
+    """Identifiers whose PROPERTY access is a translation lookup.
+
+    Declared per project (``member_access_objects``): a project that writes
+    ``t('key')`` needs nothing here, one that writes ``t.key`` needs `t`.
+    """
+    raw = _project_config().get("member_access_objects")
+    return ({str(v).strip() for v in raw if str(v).strip()}
+            if isinstance(raw, list) else set())
+
+
+def _ts_binds_name(node, name: str) -> bool:
+    """True when *node* binds *name* as a PLAIN parameter — a callback's own
+    variable, not the catalogue.
+
+    The shape of the binding is what separates the two, and it separates them
+    cleanly:
+
+        tiers.filter(t => t.threshold > 0)   ← plain identifier: a loop var
+        const Comp = ({ t, th }) => …        ← destructured: the catalogue
+        const { t } = ctx                    ← destructured: the catalogue
+
+    An earlier version counted destructuring as shadowing too, on the
+    reasoning that a binding is a binding. That silently switched the whole
+    check off for every component that receives ``t`` as a prop — which is
+    most of them — while still looking like it had run. Only a bare
+    identifier parameter shadows here; a name pulled out of an object is how
+    a catalogue is received, never how a callback variable is introduced.
+    """
+    def plain_params(target):
+        """Identifier parameters, skipping anything inside a pattern."""
+        if target is None:
+            return []
+        if target.type == 'identifier':
+            return [target]
+        out = []
+        for child in target.children:
+            if child.type == 'identifier':
+                out.append(child)
+            elif child.type in ('required_parameter', 'optional_parameter'):
+                inner = child.child_by_field_name('pattern')
+                if inner is not None and inner.type == 'identifier':
+                    out.append(inner)
+        return out
+
+    targets = [node.child_by_field_name('parameters'),
+               node.child_by_field_name('parameter')]
+    if node.type == 'arrow_function' and not any(targets):
+        for child in node.children:
+            if child.type in ('identifier', 'formal_parameters'):
+                targets.append(child)
+                break
+    for target in targets:
+        for ident in plain_params(target):
+            if ident.text.decode('utf-8', 'replace') == name:
+                return True
+    return False
+
+
+def _ts_is_call_argument(node) -> bool:
+    """True when *node* is written directly as an argument of a call.
+
+    An inline callback (``list.filter(t => …)``) is an argument; a helper
+    assigned to a name (``const label = (action, t) => …``) is not. That is
+    the line between a loop variable called ``t`` and a catalogue handed to a
+    helper on purpose, and it is the only signal that separates them without
+    following the call site.
+    """
+    cur, parent = node, node.parent
+    depth = 0
+    while parent is not None and depth < 20:
+        depth += 1
+        if parent.type == 'parenthesized_expression':
+            cur, parent = parent, parent.parent
+            continue
+        if parent.type in ('arguments', 'argument_list'):
+            return True
+        return parent.type in _TS_CALL_TYPES
+    return False
+
+
+def _ts_is_shadowed(node, name: str) -> bool:
+    """True when *name* at *node* is bound as a PLAIN parameter nearby.
+
+    Deliberately NOT read as "this is not the catalogue". Both of these bind
+    ``t`` as a plain parameter and only one is a loop variable:
+
+        tiers.filter(t => t.threshold > 0)        ← a tier
+        const label = (action, t) => t.qty        ← the catalogue, passed in
+
+    Nothing at the definition site separates them, so the answer here means
+    "ambiguous", and the caller downgrades rather than discards: an ambiguous
+    read still counts as USE (so a live key is never called an orphan) but
+    never as evidence of a MISSING key (so ``t.threshold`` is never reported
+    as an untranslated string). Under-reporting is the cheaper mistake — a
+    false blocking finding is what makes a check stop being trusted."""
+    cur = node.parent
+    depth = 0
+    while cur is not None and depth < 200:
+        depth += 1
+        if cur.type in _TS_FUNC_TYPES and _ts_binds_name(cur, name):
+            return True
+        if cur.type in ('catch_clause', 'for_in_statement'):
+            param = cur.child_by_field_name('parameter') or cur.child_by_field_name('left')
+            if param is not None and param.text.decode('utf-8', 'replace') == name:
+                return True
+        cur = cur.parent
+    return False
+
+
+def _ts_has_fallback(node) -> bool:
+    """True when something stands to the RIGHT of the key in a ``||`` chain.
+
+    "Has a fallback" means: if this key is missing, another value is reached.
+    So the test is not "is it the left operand" but "does the chain continue
+    past it" — and a chain is left-associative, which puts the middle term on
+    the RIGHT of the inner node:
+
+        t.a || t.b || "x"   parses as   (t.a || t.b) || "x"
+
+    ``t.b`` is nobody's left operand, yet ``"x"`` still covers it. Reading only
+    the immediate parent called that unprotected. So: climb while the node is
+    the right operand of a ``||``/``??``, and answer yes the moment it is a
+    left operand. ``a || t.qty`` correctly answers no — there the catalogue
+    value IS the last resort, and a missing key reaches the screen.
+    """
+    cur, parent = node, node.parent
+    depth = 0
+    while parent is not None and depth < 100:
+        depth += 1
+        if parent.type == 'parenthesized_expression':
+            cur, parent = parent, parent.parent
+            continue
+        if parent.type != 'binary_expression':
+            return False
+        op = parent.child_by_field_name('operator')
+        if op is None or op.text.decode('utf-8', 'replace') not in ('||', '??'):
+            return False
+        left = parent.child_by_field_name('left')
+        if left is not None and left.id == cur.id:
+            return True
+        cur, parent = parent, parent.parent
+    return False
+
+
+def _extract_member_keys_ast(src: str, ext: str, names: Set[str]):
+    """``[(key, line, has_fallback, ambiguous)]`` from the parse tree, or None."""
+    if _FORCE_REGEX_EXTRACTION:
+        return None
+    lang = _TS_LANG_BY_EXT.get(ext)
+    if not lang:
+        return None
+    parser = _ts_parser(lang)
+    if parser is None:
+        return None
+    try:
+        data = src.encode('utf-8', 'replace')
+        tree = parser.parse(data)
+        if tree is None or tree.root_node is None:
+            return None
+        # A guessed structure cannot be trusted to resolve scope, and a wrong
+        # shadowing answer is worse than no answer: hand back to the regex.
+        if getattr(tree.root_node, 'has_error', False):
+            return None
+    except Exception:
+        logger.debug("tree-sitter could not read a %s file", ext, exc_info=True)
+        return None
+
+    out = []
+    stack = [tree.root_node]
+    seen = 0
+    while stack:
+        node = stack.pop()
+        seen += 1
+        if seen > 400_000:
+            break
+        stack.extend(node.children)
+        if node.type != 'member_expression':
+            continue
+        obj = node.child_by_field_name('object')
+        prop = node.child_by_field_name('property')
+        if obj is None or prop is None or obj.type != 'identifier':
+            continue
+        if prop.type not in ('property_identifier', 'identifier'):
+            continue
+        if obj.text.decode('utf-8', 'replace') not in names:
+            continue
+        key = prop.text.decode('utf-8', 'replace')
+        if key in _MEMBER_KEY_STOPWORDS or not _MEMBER_KEY_PATTERN.match(key):
+            continue
+        ambiguous = _ts_is_shadowed(node, obj.text.decode('utf-8', 'replace'))
+        line = src.count("\n", 0, node.start_byte) + 1
+        out.append((key, line, _ts_has_fallback(node), ambiguous))
+    return out
+
+
+def _extract_member_keys_regex(src: str, names: Set[str]):
+    """``[(key, line, has_fallback, ambiguous)]`` without a tree.
+
+    Scope cannot be resolved here, so the binding test degrades to a
+    line-local one: a line that BINDS the name marks its reads ambiguous. It
+    catches the common ``list.filter(t => t.x)`` and misses a binding opened
+    on an earlier line — which is why the tree path is preferred.
+    """
+    if not names:
+        return []
+    src = _blank_comments(src)
+    alt = "|".join(re.escape(n) for n in sorted(names))
+    rx_use = re.compile(r"\b(?:" + alt + r")\.([A-Za-z][A-Za-z0-9_]*)\s*(\|\||\?\?)?")
+    rx_bind = re.compile(
+        r"(?:\(\s*(?:" + alt + r")\s*[,)]|\b(?:" + alt + r")\s*=>"
+        r"|\b(?:const|let|var|function)\s+(?:" + alt + r")\b)")
+    out = []
+    for lineno, line in enumerate(src.split("\n"), start=1):
+        ambiguous = bool(rx_bind.search(line))
+        for m in rx_use.finditer(line):
+            key = m.group(1)
+            if key in _MEMBER_KEY_STOPWORDS or not _MEMBER_KEY_PATTERN.match(key):
+                continue
+            out.append((key, lineno, bool(m.group(2)), ambiguous))
+    return out
+
+
+def _extract_member_keys(src: str, ext: str):
+    """``[(key, line, has_fallback, ambiguous)]`` for the catalogue objects."""
+    names = _member_access_objects()
+    if not names:
+        return []
+    result = _extract_member_keys_ast(src, ext, names)
+    if result is not None:
+        return result
+    return _extract_member_keys_regex(src, names)
 
 
 def _extract_keys(src: str, ext: str) -> Tuple[Set[str], Set[str]]:
@@ -2805,10 +3107,13 @@ class UniversalQualityAnalyzer:
             'hardcoded': [], 'json_duplicates': [], 'mixed_langs': [],
             'missing_keys': [], 'empty_values': [], 'mismatched_vars': [],
             'orphan_keys': set(), 'unresolved_code_keys': [], 'icu_plurals': [],
+            'member_missing': [], 'member_fallback_only': [],
         }
         self.all_known_keys: Set[str] = set()
         self.all_used_code_keys: Set[str] = set()
         self.all_t_call_keys: Set[str] = set()
+        # Letture t.chiave: chiave, file, riga e se c'e' un fallback.
+        self.member_key_uses = []
         self.all_dynamic_prefixes: Set[str] = set()
         # kind -> how many findings that suppression held back. Reported,
         # never silent: see _exempt_flags.
@@ -2836,6 +3141,7 @@ class UniversalQualityAnalyzer:
         self.test_python_code()
         self.test_missing_keys_global()
         self.test_unresolved_code_keys()
+        self.test_member_access_keys()
         self.test_empty_values_and_placeholders()
         self.test_mixed_languages()
         self.test_orphan_keys()
@@ -3211,6 +3517,17 @@ class UniversalQualityAnalyzer:
                         self.all_t_call_keys.update(_keys)
                         self.all_dynamic_prefixes.update(_prefixes)
                         _rel = str(fpath.relative_to(PROJECT_ROOT))
+                        # Catalogo letto come oggetto (t.chiave): tenuto a
+                        # parte dalle chiamate t('chiave') perche' la regola
+                        # del fallback vale solo qui, ma confluisce comunque
+                        # in all_used_code_keys — altrimenti l'analisi delle
+                        # chiavi orfane le direbbe tutte inutilizzate.
+                        for _mk, _mline, _mfb, _mamb in _extract_member_keys(_src, ext):
+                            self.all_used_code_keys.add(_mk)
+                            self.member_key_uses.append(
+                                {'key': _mk, 'file': _rel, 'line': _mline,
+                                 'fallback': _mfb, 'ambiguous': _mamb,
+                                 'preview': _preview(_src.splitlines(), _mline)})
                         _other_lines = _src.splitlines()
                         # The tree when it can answer, the regex when it
                         # cannot. Which one answered is recorded per file,
@@ -3584,6 +3901,64 @@ class UniversalQualityAnalyzer:
                 "fail_empty", n=len(self.results['empty_values']),
                 items=", ".join(f"{r['lang']}:{r['key']}" for r in self.results['empty_values'][:10])))
 
+    def test_member_access_keys(self):
+        """Catalogo letto come OGGETTO: ``t.chiave`` invece di ``t('chiave')``.
+
+        Le chiamate non vedono questo stile — la chiave non e' mai una
+        stringa letterale — quindi senza questo controllo un progetto cosi'
+        scritto riceve un "ogni chiave usata esiste" che non ha guardato
+        niente. Le chiavi arrivano gia' filtrate dallo shadowing (una ``t``
+        di ciclo non e' il catalogo).
+
+        Due esiti distinti per la stessa chiave mancante, perche' sono due
+        problemi diversi:
+          - letta senza fallback  -> a schermo esce "undefined": bloccante;
+          - sempre con fallback   -> innocua, ma il testo di ripiego e' nel
+            codice e di norma non tradotto: informativa.
+        """
+        print("\n" + L("an_member"))
+        if not _member_access_objects():
+            print(L("member_off"))
+            return
+        if not self.member_key_uses:
+            print(L("member_ok"))
+            return
+        print(L("member_seen", n=len(self.member_key_uses),
+                o=", ".join(sorted(_member_access_objects()))))
+
+        # Solo le letture NON ambigue accusano una chiave di essere mancante:
+        # da un binding indistinguibile non si puo' dire se l'oggetto era il
+        # catalogo, e un falso bloccante costa piu' di una chiave non vista.
+        missing = defaultdict(list)
+        for use in self.member_key_uses:
+            if use.get('ambiguous'):
+                continue
+            if use['key'] not in self.all_known_keys:
+                missing[use['key']].append(use)
+
+        bad, fb_only = [], []
+        for key, uses in missing.items():
+            naked = [u for u in uses if not u['fallback']]
+            (bad if naked else fb_only).append(
+                {'key': key, 'uses': naked or uses})
+
+        bad.sort(key=lambda r: r['key'])
+        fb_only.sort(key=lambda r: r['key'])
+        self.results['member_missing'] = bad
+        self.results['member_fallback_only'] = fb_only
+
+        if bad:
+            print(L("member_bad", n=len(bad)))
+            for row in bad:
+                where = row['uses'][0]
+                print(f"      - {row['key']}  ({where['file']}:{where['line']})")
+            self.failures.append(L("fail_member", n=len(bad),
+                                   items=", ".join(r['key'] for r in bad[:10])))
+        if fb_only:
+            print(L("member_fb", n=len(fb_only)))
+        if not bad and not fb_only:
+            print(L("member_ok"))
+
     def test_orphan_keys(self):
         """Orphan detection, v2 — extraction now also follows f-strings
         assigned to variables, string concatenation and conditional
@@ -3785,6 +4160,8 @@ class UniversalQualityAnalyzer:
             rows = [
                 (L("cat_dups"), self.results['json_duplicates'], L("sev_crit")),
                 (L("cat_vars"), self.results['mismatched_vars'], L("sev_crit")),
+                (L("cat_member"), self.results['member_missing'], L("sev_crit")),
+                (L("cat_member_fb"), self.results['member_fallback_only'], L("sev_med")),
                 (L("cat_unresolved"), self.results['unresolved_code_keys'], L("sev_crit")),
                 (L("cat_icu") + " — high",
                  [i for i in self.results['icu_plurals'] if i['severity'] == 'high'],
@@ -3832,6 +4209,25 @@ class UniversalQualityAnalyzer:
                 for k in self.results['unresolved_code_keys']:
                     f.write(f"- [ ] `{k}`\n")
                 f.write("\n")
+
+            if (self.results['member_missing']
+                    or self.results['member_fallback_only']):
+                f.write(L("r_member_h"))
+                if self.results['member_missing']:
+                    f.write(L("r_member_bad"))
+                    for row in self.results['member_missing']:
+                        f.write(f"- [ ] `{row['key']}`\n")
+                        for use in row['uses'][:5]:
+                            f.write(f"  - [{use['file']}:{use['line']}]"
+                                    f"(../{use['file']}#L{use['line']})"
+                                    f" — `{use['preview']}`\n")
+                    f.write("\n")
+                if self.results['member_fallback_only']:
+                    f.write(L("r_member_fb"))
+                    for row in self.results['member_fallback_only']:
+                        use = row['uses'][0]
+                        f.write(f"- `{row['key']}` — {use['file']}:{use['line']}\n")
+                    f.write("\n")
 
             if self.results['hardcoded']:
                 tiers = [
