@@ -32,6 +32,8 @@ quality budgets does so from an optional file in its own root.
 | 8 | **Mixed-language values** — e.g. English text inside the Italian dictionary, backed by stopword evidence + langdetect | ℹ️ Low | yes |
 | 9 | **ICU plural coverage** — a `plural` that omits a form its language actually selects, plus malformed messages, a missing `other`, misspelt or duplicated categories | 🚸 Graded | structural errors always; missing forms only with real CLDR rules |
 | 10 | **Self-test** — the analyzer run against a synthetic project with planted problems, one assertion per behaviour | 🧪 Meta | on demand |
+| 11 | **Source labels quoted untranslated** — with the sentence as the key, a translation that names another control by its source-language label (`Tick 'Live control'` → `Marque 'Live control'`) | ⚠️ High | yes, with `key_style: source_text` |
+| 12 | **Data texts outside the catalogue** — prose kept in data files (notes, descriptions) that no scan of the code can see | ⚠️ High | yes, with `data_texts` declared |
 
 ### On the plural check
 
@@ -336,12 +338,21 @@ so budgets are opt-in and absent means "report only".
 ## Project configuration
 
 One optional file, `.i18n-quality.json`. **It writes itself** the first
-time it is missing: a commented template with every value empty, which
-changes nothing until something is filled in and is safe to delete. A
-read-only checkout says so and carries on with the built-ins. Present but
-unreadable also says so, rather than looking like a clean pass. A
-byte-order mark — what Notepad and Windows PowerShell add by default — is
-tolerated. Run `--vocab-help` for the short version.
+time a run finds it missing, carrying the values the analyzer already uses:
+switches on (`exempt`), `key_style` at `"keys"`, budgets off (`null`), and
+the lists empty. The lists are *additive* — what you put in one is added to
+the built-in names — so the comment above each names what is already built
+in instead of copying it into the list, which would suggest that deleting a
+name there switches it off. The comments are built from the analyzer's own
+constants, so they cannot go stale. Leaving the file as it is, or deleting
+it, changes nothing; edit a value to change the behaviour. `--self-test`
+keeps that true: it analyses the same project with and without the
+generated file and demands identical findings. It is written when the
+analyzer is *run*, never when the file is imported. A read-only checkout
+says so and carries on with the built-ins. Present but unreadable also says
+so, rather than looking like a clean pass. A byte-order mark — what Notepad
+and Windows PowerShell add by default — is tolerated. Run `--vocab-help`
+for the short version.
 
 **In a monorepo each package answers for itself.** The nearest file above
 a source file is the one in force for it, inheriting everything it does
@@ -378,9 +389,14 @@ totals it compares against are global.
   goes here: dev-only scripts, vendored copies, an archive of old
   sources. Nothing about one repository belongs in the tool, which is why
   this is a list here and not a constant in the script.
-- **`exempt`** — the three noise suppressions, each on by default:
+- **`exempt`** — the noise suppressions, each on by default:
   `raise_arguments` (the message of an exception the code raises),
-  `regex_patterns`, `user_agents`. Whatever they hold back is **counted
+  `regex_patterns`, `user_agents`, `markup_fragments` (the static pieces of an
+  f-string that carry no wording — `f"{w}x{h} px<br>"`, a tag, a quote the next
+  value closes), `commands` (shell command lines: flag tokens plus at most two
+  other words, so a sentence that merely mentions `--verbose` is still
+  reported) and `cli_help` (the `help=`/`description=` text of an argparse
+  parser, which is for a terminal and not the interface). Whatever they hold back is **counted
   and named in the report** rather than dropped in silence, so turning one
   off is a decision made with the number in front of you. A project whose
   exception text reaches a dialog turns `raise_arguments` off.
@@ -392,6 +408,58 @@ totals it compares against are global.
   (`useTranslations()('nav.home')`). Both shapes are tried for every name,
   because declaring which one it is would be one more thing to get wrong.
 - **`budgets`** — see above.
+- **`key_style`** — `"keys"` (the default) or `"source_text"`. With identifiers
+  as keys (`t('nav.home')`) a sentence sitting in the code is suspect and a
+  catalogue key nobody mentions is dead. With the sentence itself as the key
+  (`t("Save the file")`, as gettext does) both flip, so the tool asks
+  different questions: a sentence inside a translation call is the thing
+  being translated, not a hardcoded text; a literal the catalogue holds as a
+  key is translated where it is shown (a registry of labels, a table) and is
+  alive wherever its text is written; a sentence passed to `t()` that the
+  catalogue lacks is a blocking finding; and translations are checked for
+  quoted labels left in the source language. Both groups of strings it holds
+  back are **counted and named in the report**, like every other suppression, and the
+  catalogue-held literals are **listed with file and line** in a collapsible review
+  section (that is the one assumption the mode takes on trust).
+  Declared, not guessed: a guess that went the wrong way would flip every
+  finding at once.
+- **`data_texts`** — prose that lives in data files rather than in code.
+  The code only passes it through, so it is never a literal and never inside
+  a translation call, and every other check reports a clean project while the
+  translated interface shows it in the source language. Each rule is a glob
+  from the project root and the paths of the JSON values that are prose:
+
+  ```json
+  "data_texts": [
+    { "glob": "presets/*.json",
+      "paths": ["title", "items.*.note", "**.caption", "checks.*#key"],
+      "min_length": 3 }
+  ]
+  ```
+
+  In a path `*` is one level (a key or a list index) and `**` any number of
+  levels; a last segment ending in `#key` is the *name* of an object member
+  (prose is sometimes the key). Identifiers are simply not listed. Every
+  matched text must be a key of the catalogue; `min_length` (default 3)
+  skips tokens like `ok`. The same texts keep their catalogue entries from
+  being reported as orphans.
+
+  Data that is shared on its own can carry its translations with it. Add
+  `catalogue`, a glob relative to each data file's folder, and the texts are
+  checked in the files it matches — one flat `{text: translation}` file per
+  language — instead of the project's catalogue; `require` lists the
+  languages (file names without `.json`) that must exist and be complete:
+
+  ```json
+  { "glob": "presets/*/preset.json",
+    "paths": ["title", "items.*.note"],
+    "catalogue": "lang/*.json",
+    "require": ["es"] }
+  ```
+
+  An empty or missing entry is a finding that names its language, and so is
+  a required language with no file. Those `lang/` folders are the data's, not
+  the project's, so locale discovery leaves them alone.
 
 ## Checking the analyzer itself
 
@@ -407,7 +475,7 @@ and asserts each one:
   [OK  ] function_not_ignored   a string argument to a FUNCTION named get() still is
   [OK  ] vocab_loaded           the project's own tech_words reach the neutral vocabulary
   …
-🟢 Self-test passed (143 cases).
+🟢 Self-test passed (176 cases).
 ```
 
 Three scenarios run, not one: a JSON/Python project, a JavaScript one

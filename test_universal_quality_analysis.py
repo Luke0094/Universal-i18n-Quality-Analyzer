@@ -128,6 +128,40 @@ _L10N = {
     "orphan_none":    {"en": "   🟢 no orphan keys", "it": "   🟢 nessuna chiave orfana"},
     "an_mixed":       {"en": "🌍 MIXED-LANGUAGE ANALYSIS (v2 — stopword evidence)...",
                         "it": "🌍 ANALISI LINGUE MISTE (v2 — stopword evidence)..."},
+    "key_style_note": {"en": "   🔑 key style: source text — the sentence written in the code IS the key",
+                        "it": "   🔑 stile delle chiavi: testo sorgente — la frase scritta nel codice E' la chiave"},
+    "an_quoted":      {"en": "🧾 LABELS QUOTED INSIDE TRANSLATIONS (source text as key)...",
+                        "it": "🧾 ETICHETTE CITATE DENTRO LE TRADUZIONI (testo sorgente come chiave)..."},
+    "quoted_off":     {"en": "   ℹ️ only for projects whose key is the source text — declare \"key_style\": \"source_text\" in .i18n-quality.json",
+                        "it": "   ℹ️ solo per progetti la cui chiave e' il testo sorgente — dichiara \"key_style\": \"source_text\" in .i18n-quality.json"},
+    "quoted_bad":     {"en": "   ❌ {n} translation(s) quote a label of the source language without translating it:",
+                        "it": "   ❌ {n} traduzione/i citano un'etichetta della lingua sorgente senza tradurla:"},
+    "quoted_ok":      {"en": "   🟢 every label quoted inside a translation is itself translated",
+                        "it": "   🟢 ogni etichetta citata dentro una traduzione e' a sua volta tradotta"},
+    "an_data":        {"en": "📚 TEXTS KEPT IN DATA FILES (prose the code never sees)...",
+                        "it": "📚 TESTI NEI FILE DI DATI (prosa che il codice non vede)..."},
+    "data_off":       {"en": "   ℹ️ not configured — declare \"data_texts\" in .i18n-quality.json to check prose kept in data files",
+                        "it": "   ℹ️ non configurato — dichiara \"data_texts\" in .i18n-quality.json per controllare la prosa nei file di dati"},
+    "data_bad":       {"en": "   ❌ {n} text(s) in data files with no entry in the catalogue (they would be shown untranslated):",
+                        "it": "   ❌ {n} testo/i nei file di dati senza voce nel catalogo (si vedrebbero non tradotti):"},
+    "data_ok":        {"en": "   🟢 every checked text in the data files is in the catalogue ({n} checked)",
+                        "it": "   🟢 ogni testo controllato nei file di dati e' nel catalogo ({n} controllati)"},
+    "fail_quoted":    {"en": "{n} translation(s) quote a source-language label without translating it: {items}",
+                        "it": "{n} traduzione/i citano un'etichetta della lingua sorgente senza tradurla: {items}"},
+    "fail_data":      {"en": "{n} text(s) in data files missing from the catalogue: {items}",
+                        "it": "{n} testo/i nei file di dati mancanti dal catalogo: {items}"},
+    "cat_quoted":     {"en": "Source labels quoted untranslated", "it": "Etichette sorgente citate non tradotte"},
+    "cat_data":       {"en": "Data texts not in the catalogue", "it": "Testi dei dati fuori dal catalogo"},
+    "r_quoted_h":     {"en": "## 🧾 Source labels quoted inside translations\n> The translation is in the right language, but a label it mentions is still written in the source language — the sentence reads half-translated.\n\n",
+                        "it": "## 🧾 Etichette sorgente citate dentro le traduzioni\n> La traduzione e' nella lingua giusta, ma un'etichetta che nomina e' rimasta nella lingua sorgente — la frase si legge tradotta a meta'.\n\n"},
+    "r_quoted_line":  {"en": "- `{lang}` — «{frag}» should read «{expected}»  (in: `{key}`)\n",
+                        "it": "- `{lang}` — «{frag}» dovrebbe essere «{expected}»  (in: `{key}`)\n"},
+    "r_data_h":       {"en": "## 📚 Data texts not in the catalogue\n> Prose stored in data files (notes, descriptions): shown as written, so without an entry it stays in the source language.\n\n",
+                        "it": "## 📚 Testi dei dati fuori dal catalogo\n> Prosa conservata in file di dati (note, descrizioni): si mostra com'e' scritta, quindi senza una voce resta nella lingua sorgente.\n\n"},
+    "r_data_line":    {"en": "- [ ] `{file}` at `{path}`: `{text}`\n",
+                        "it": "- [ ] `{file}` in `{path}`: `{text}`\n"},
+    "r_catalogued_h": {"en": "\n<details><summary>🔎 Review: {n} literals held back because the catalogue has them as a key</summary>\n\n> Fine when they are translated where they are shown (a registry, a label table). Not fine when handed raw to a constructor or a widget - this is the list to skim.\n\n",
+                        "it": "\n<details><summary>🔎 Da rivedere: {n} letterali trattenuti perche' il catalogo li ha come chiave</summary>\n\n> Vanno bene se vengono tradotti dove si mostrano (un registro, una tabella di etichette). Non vanno bene se passati cosi' a un costruttore o a un widget - e' l'elenco da scorrere.\n\n"},
     "report_gen":     {"en": "📝 GENERATING REPORT...", "it": "📝 GENERAZIONE REPORT IN CORSO..."},
     "done":           {"en": "🎉 Done! Report: {path}", "it": "🎉 Finito! Report: {path}"},
     # blocking-failure summaries
@@ -267,12 +301,12 @@ _L10N = {
                         "it": "❌ Auto-test FALLITO — {n} caso/i: {ids}"},
     "cfg_unreadable":  {"en": "   ⚠️ {file} could not be read ({err}) — built-in defaults only",
                         "it": "   ⚠️ {file} non leggibile ({err}) — solo impostazioni predefinite"},
-    "cfg_created":    {"en": "   📝 {file} did not exist — wrote a commented "
-                             "template. It is optional: an empty one changes "
-                             "nothing, and deleting it is fine.",
-                        "it": "   📝 {file} non esisteva — scritto un modello "
-                             "commentato. È opzionale: vuoto non cambia "
-                             "nulla, e cancellarlo va bene."},
+    "cfg_created":    {"en": "   📝 {file} did not exist — wrote it with the values "
+                             "the analyzer already uses, so nothing changes until "
+                             "you edit it. Deleting it is fine.",
+                        "it": "   📝 {file} non esisteva — scritto con i valori che "
+                             "l'analizzatore già usa, quindi non cambia nulla "
+                             "finché non lo modifichi. Cancellarlo va bene."},
     "cfg_uncreatable": {"en": "   ℹ️ {file} is absent and could not be created "
                               "({err}) — built-in defaults only",
                         "it": "   ℹ️ {file} assente e non creabile ({err}) — "
@@ -297,6 +331,18 @@ _L10N = {
                         "it": "espressioni regolari"},
     "ex_agent":       {"en": "HTTP User-Agent strings",
                         "it": "stringhe User-Agent HTTP"},
+    "ex_translated":  {"en": "strings already inside a translation call (the sentence is the key)",
+                        "it": "stringhe gia' dentro una chiamata di traduzione (la frase e' la chiave)"},
+    "ex_catalogued":  {"en": "strings the catalogue holds as a key (translated where they are shown: registries, label tables)",
+                        "it": "stringhe che il catalogo ha come chiave (tradotte dove si mostrano: registri, tabelle di etichette)"},
+    "ex_markup":      {"en": "pieces of text that are not text: the glue of an f-string around its values (units, tags, an open quote)",
+                        "it": "pezzi di testo che non sono testo: la colla di una f-string attorno ai valori (unita', tag, una virgoletta aperta)"},
+    "ex_command":     {"en": "pieces of shell command lines",
+                        "it": "pezzi di righe di comando"},
+    "ex_cli_help":    {"en": "help text of a command-line parser (it is not interface text)",
+                        "it": "testo di aiuto di un parser da riga di comando (non e' testo dell'interfaccia)"},
+    "hint_source_text": {"en": "   💡 {pct}% of the catalogue's keys are sentences, not identifiers. If the code calls t(\"A sentence\"), declare \"key_style\": \"source_text\" in .i18n-quality.json - without it every sentence inside t() is reported as hardcoded text and its catalogue entry as an orphan",
+                        "it": "   💡 il {pct}% delle chiavi del catalogo sono frasi, non identificatori. Se il codice chiama t(\"Una frase\"), dichiara \"key_style\": \"source_text\" in .i18n-quality.json - senza, ogni frase dentro t() risulta testo scritto a mano e la sua voce del catalogo orfana"},
     "an_severity":    {"en": "🎚️ FINDINGS BY SEVERITY...",
                         "it": "🎚️ RISULTATI PER GRAVITÀ..."},
     "sev_count":      {"en": "   {level}: {n}",
@@ -1839,71 +1885,139 @@ def _tech_words() -> Set[str]:
     return _TECH_WORDS_BUILTIN | _project_config_list("tech_words")
 
 
-CONFIG_TEMPLATE = {
-    "_comment": (
-        "Optional configuration for the i18n quality analyzer. Everything "
-        "here describes THIS project; the analyzer itself stays "
-        "project-agnostic. An empty file changes nothing, and deleting it "
-        "is fine — the tool runs on its built-ins."),
+#: Keyword names that carry the KEY in ``t(key='nav.home')``. A project's own (``translation_kwargs``) are added to these.
+_TRANSLATION_KWARGS_BUILTIN = frozenset({"key", "msgid", "message_id", "string_id", "id"})
 
-    "_tech_words": (
-        "Treated as language-neutral by the mixed-language check: spelled "
-        "the same in every locale, so finding one in a translated string is "
-        "not evidence it was left in the wrong language. The analyzer ships "
-        "the wide-reach names (operating systems, clouds, protocols); this "
-        "is where a project adds its own domain."),
-    "tech_words": [],
 
-    "_ui_functions": (
-        "Extra call names whose string arguments reach the screen, on top "
-        "of the toolkits the analyzer knows. Add house widgets here so the "
-        "high-severity tier keeps working for them."),
-    "ui_functions": [],
+def _config_template() -> dict:
+    """The default configuration, as written the first time the project has none.
 
-    "_exclude_dirs": (
-        "Directories to skip, on top of the universal ones (caches, "
-        "virtualenvs, build output, the test tree). This is where "
-        "non-shipping code goes: dev-only scripts, vendored copies, an "
-        "archive of old sources."),
-    "exclude_dirs": [],
+    Every value is one the analyzer already uses, so the file that gets written
+    changes nothing - a self-test runs a project with and without it and
+    demands identical findings. Scalars and switches carry their real defaults
+    (change one and the behaviour changes). The LISTS are additive - what a
+    project lists is added to the built-ins - so they start empty, and the
+    comment above each one names what is built in: writing the built-ins into
+    the list would suggest that deleting a name there switches it off, and it
+    would not.
 
-    "_exempt": (
-        "Noise suppressions, each counted and named in the report rather "
-        "than applied silently. Turn one off if your project localises that "
-        "kind of string: exception messages reach a dialog in some apps."),
-    "exempt": {
-        "raise_arguments": True,
-        "regex_patterns": True,
-        "user_agents": True,
-    },
+    Built from the analyzer's own constants rather than typed out, so the
+    names in the comments cannot go stale.
+    """
+    def names(values) -> str:
+        return ", ".join(sorted(values))
 
-    "_translation_kwargs": (
-        "Keyword-argument names that carry the KEY when a translation call "
-        "is written t(key='nav.home') rather than t('nav.home')."),
-    "translation_kwargs": [],
+    return {
+        "_comment": (
+            "Configuration for the i18n quality analyzer, written with the "
+            "values it already uses: leaving the file as it is, or deleting "
+            "it, changes nothing. Everything here describes THIS project; the "
+            "analyzer itself stays project-agnostic. Lists ADD to the built-in "
+            "names given in their comments - removing a built-in name from a "
+            "list does not switch it off. Keys starting with an underscore are "
+            "documentation and are ignored."),
 
-    "_extra_translation_calls": (
-        "Call names to treat as translation functions on top of the "
-        "built-ins — for wrappers, and for JS/TS factories such as "
-        "next-intl's useTranslations(), where the key is passed to what the "
-        "call RETURNS."),
-    "extra_translation_calls": [],
+        "_key_style": (
+            "How a translation call names its key. \"keys\" (the default): an "
+            "identifier that stands for the text, t('nav.home'). \"source_text\": "
+            "the sentence written in the code IS the key, t('Save the file'), as "
+            "gettext does - and the catalogue maps it to each other language. "
+            "The checks differ: with identifiers any sentence in the code is "
+            "suspect and a key no call mentions is dead; with the sentence as "
+            "key the text inside t() is the translated thing, a catalogue entry "
+            "is alive wherever its text is written (a registry of labels "
+            "translated when shown), and translations can quote one another's "
+            "labels - which is where text gets left behind."),
+        "key_style": "keys",
 
-    "_budgets": (
-        "Per-severity ceilings. Declaring one makes exceeding it a blocking "
-        "failure, which is the only way a count of hundreds ever comes "
-        "down. Left empty, the counts are informational."),
-    "budgets": {},
-}
+        "_exclude_dirs": (
+            "Directories to skip, on top of the ones always skipped (" +
+            names(PYTHON_EXCLUDES_BUILTIN) + "). Non-shipping code goes here: "
+            "dev-only scripts, vendored copies, an archive of old sources."),
+        "exclude_dirs": [],
+
+        "_ui_functions": (
+            "Extra call names whose string arguments reach the screen. Always "
+            "known: " + names(PythonCodeAnalyzer._UI_FUNCS_BUILTIN) + ". Add "
+            "house widgets here so the high-severity tier keeps working for them."),
+        "ui_functions": [],
+
+        "_translation_kwargs": (
+            "Keyword-argument names that carry the KEY when a translation call "
+            "is written t(key='nav.home') rather than t('nav.home'). Always "
+            "known: " + names(_TRANSLATION_KWARGS_BUILTIN) + "."),
+        "translation_kwargs": [],
+
+        "_extra_translation_calls": (
+            "Call names to treat as translation functions - for wrappers, and "
+            "for JS/TS factories such as next-intl's useTranslations(), where "
+            "the key is passed to what the call RETURNS. Always known: " +
+            names(TRANSLATION_FUNCTIONS) + "."),
+        "extra_translation_calls": [],
+
+        "_member_access_objects": (
+            "Identifiers whose PROPERTY access is a translation lookup: a "
+            "project that writes t.nav_home instead of t('nav_home') lists "
+            "\"t\" here. Empty: only calls are read."),
+        "member_access_objects": [],
+
+        "_tech_words": (
+            "Treated as language-neutral by the mixed-language check: spelled "
+            "the same in every locale, so finding one in a translated string is "
+            "not evidence it was left in the wrong language. Always neutral: " +
+            names(_TECH_WORDS_BUILTIN) + ". This is where a project adds its "
+            "own domain."),
+        "tech_words": [],
+
+        "_exempt": (
+            "Noise suppressions, all on by default, each counted and named in "
+            "the report rather than applied silently. Set one to false if your "
+            "project localises that kind of text: raise_arguments (the message "
+            "of an exception the code raises), regex_patterns, user_agents, "
+            "markup_fragments (the glue of an f-string around its values: "
+            "units, tags, an open quote), commands (shell command lines), "
+            "cli_help (argparse help text) and, only with key_style "
+            "source_text, translated_call (a sentence already inside a "
+            "translation call) and catalogued (a literal the catalogue holds "
+            "as a key, translated where it is shown)."),
+        "exempt": {kind: True for kind in _EXEMPT_KINDS},
+
+        "_data_texts": (
+            "Prose kept in data files rather than in code - notes and "
+            "descriptions inside presets, say. The code never sees it as a "
+            "literal, so nothing else would notice it is untranslated. Each "
+            "rule: {\"glob\": ..., \"paths\": [...]} - a glob from the project "
+            "root, and the paths of the JSON values that are prose. In a path, "
+            "* is one level (a key or a list index), ** any number of levels, "
+            "and a last segment ending in #key is the NAME of an object member: "
+            "\"items.*.note\", \"**.caption\", \"checks.*#key\". Identifiers "
+            "(an entry's id) are simply not listed. Optional: \"min_length\" "
+            "(default 3) skips tokens like \"ok\"; \"catalogue\" is a glob "
+            "relative to each data file's folder (\"lang/*.json\"): when "
+            "given, the texts are checked in THOSE files - one catalogue per "
+            "language, each a flat {text: translation} - instead of the "
+            "project's own catalogue, so data that travels on its own carries "
+            "its translations with it; \"require\" lists the catalogue names "
+            "(without .json) that must exist and be complete."),
+        "data_texts": [],
+
+        "_budgets": (
+            "Per-severity ceilings for the hardcoded-text findings. null means "
+            "no ceiling: the counts are informational. A number makes exceeding "
+            "it a blocking failure, which is the only way a count of hundreds "
+            "ever comes down."),
+        "budgets": {"high": None, "medium": None, "low": None},
+    }
 
 
 def _write_config_template() -> None:
-    """Drop a commented template next to the project, once.
+    """Drop the default configuration next to the project, once.
 
     Written rather than described in the docs because a file that does not
     exist is a file nobody edits: the options below are discoverable only if
-    they are sitting in the repository. Every value in it is empty, so the
-    run it was created during behaves exactly as if it were still absent.
+    they are sitting in the repository. Every value in it is one the analyzer
+    already uses, so the run it was created during behaves exactly as if it
+    were still absent.
 
     Never overwrites, and never fails the run: a read-only checkout or a CI
     workspace simply says so and carries on with built-ins.
@@ -1913,13 +2027,26 @@ def _write_config_template() -> None:
         if path.exists():
             return
         path.write_text(
-            json.dumps(CONFIG_TEMPLATE, ensure_ascii=False, indent=2) + "\n",
+            json.dumps(_config_template(), ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8")
         _config_state["created"] = True
         print(L("cfg_created", file=PROJECT_VOCAB_FILE))
     except Exception as exc:                                # noqa: BLE001
         _config_state["error"] = str(exc)
         print(L("cfg_uncreatable", file=PROJECT_VOCAB_FILE, err=exc))
+
+
+def _ensure_config_template() -> None:
+    """Write the default configuration if the project has none - when the analyzer is RUN.
+
+    Not when it is imported: loading this file to read a function from it (a
+    test does) used to drop a configuration into whatever directory it
+    defaulted to. So the write is an explicit step of a run, not a side effect
+    of the first time anything asks for the configuration.
+    """
+    if not (PROJECT_ROOT / PROJECT_VOCAB_FILE).exists():
+        _config_state["found"] = False
+        _write_config_template()
 
 
 #: Directory whose configuration is in force, or None for the root's.
@@ -1979,7 +2106,23 @@ def _config_chain(directory) -> dict:
     package's, and a folder one of them vendors is not excluded for the
     others. So each package answers for itself, and inherits everything it
     does not mention.
+
+    Memoised per (root, directory): the visitors ask for the configuration
+    on almost every syntax node (is this call a translation call? a UI
+    widget?), and re-resolving the chain each time - a resolve() and a merge
+    per ancestor folder - was most of a run's cost. It shares storage with
+    the per-directory file cache, so clearing that one clears this too.
     """
+    memo_key = f"chain:{PROJECT_ROOT}|{directory}"
+    cached = _dir_config_cache.get(memo_key)
+    if cached is not None:
+        return cached
+    merged = _resolve_config_chain(directory)
+    _dir_config_cache[memo_key] = merged
+    return merged
+
+
+def _resolve_config_chain(directory) -> dict:
     try:
         directory = Path(directory).resolve()
         root = Path(PROJECT_ROOT).resolve()
@@ -2047,7 +2190,6 @@ def _project_config() -> dict:
                     data = loaded
             else:
                 _config_state["found"] = False
-                _write_config_template()
         except Exception as exc:
             # Said out loud, not swallowed: a configuration file that is
             # present but unreadable used to leave the run silently using
@@ -2071,6 +2213,12 @@ _EXEMPT_KINDS = {
     "raise_arguments": "ex_raise",
     "regex_patterns": "ex_regex",
     "user_agents": "ex_agent",
+    "markup_fragments": "ex_markup",
+    "commands": "ex_command",
+    "cli_help": "ex_cli_help",
+    # only counted when key_style is "source_text" (see _source_text_mode)
+    "translated_call": "ex_translated",
+    "catalogued": "ex_catalogued",
 }
 
 
@@ -2106,6 +2254,47 @@ def _looks_like_user_agent(text: str) -> bool:
     return bool(re.match(r"^[A-Za-z][\w.-]{1,40}/\d[\w.]*(\s|$)", text or ""))
 
 
+_RX_MARKUP_TAG = re.compile(r"<[^>]*>|<[^>]*$")
+_RX_ENTITY = re.compile(r"&[A-Za-z]+;|&#\d+;")
+#: Units and similar tokens that carry no wording of their own around a value ("12 px", "40 ms").
+_UNIT_WORDS = frozenset({"px", "ms", "pt", "em", "rem", "dpi", "fps", "hz", "khz", "mhz", "kb", "mb", "gb", "kib", "mib", "gib"})
+_RX_FLAG_TOKEN = re.compile(r"(?:--?[A-Za-z][\w-]*|/[A-Za-z][\w-]*)(?:=\S*)?")
+
+
+def _has_words(text: str) -> bool:
+    """Is there a word in *text* once markup, entities, digits, punctuation and units are taken away?
+
+    The static pieces of an f-string are not sentences: in ``f"{w}x{h} px<br>"`` the pieces are
+    ``x`` and `` px<br>``, and ``f'<b>{name}</b><img src="{uri}">'`` is nothing but tags. Reporting
+    those as hardcoded text sends a person looking for something to translate that is not there.
+    A run of at least three letters that is not a unit counts as a word.
+    """
+    stripped = _RX_ENTITY.sub(" ", _RX_MARKUP_TAG.sub(" ", text))
+    return any(w.lower() not in _UNIT_WORDS for w in re.findall(r"[^\W\d_]{3,}", stripped))
+
+
+def _unbalanced_quote(text: str) -> bool:
+    """An odd number of double quotes: a piece of a longer string whose next part (a value) closes it.
+
+    ``'install "'`` and ``'<img src="'`` are the first halves of ``'install "{path}"'`` and
+    ``'<img src="{uri}">'``; a sentence written for a person almost never ends on an open quote.
+    """
+    return text.count('"') % 2 == 1
+
+
+def _looks_like_command(text: str) -> bool:
+    """A command line, not prose: flag tokens (``/uninstall``, ``--force``, ``-v``) and at most two other words.
+
+    ``pnputil /delete-driver `` and `` /uninstall /force`` are arguments to a program. A sentence that
+    merely mentions a flag ("Run with --verbose to see more") has too many other words to qualify,
+    so it is still reported.
+    """
+    tokens = text.split()
+    flags = [t for t in tokens if _RX_FLAG_TOKEN.fullmatch(t)]
+    others = [t for t in tokens if t not in flags and re.search(r"[A-Za-z]{2,}", t)]
+    return bool(flags) and len(others) <= 2
+
+
 def _exempt_flags() -> Dict[str, bool]:
     """Which noise suppressions are on. All of them, unless told otherwise.
 
@@ -2132,7 +2321,7 @@ def _translation_kwargs() -> Set[str]:
     raw = _project_config().get("translation_kwargs")
     extra = ({str(v).strip() for v in raw if str(v).strip()}
              if isinstance(raw, list) else set())
-    return {"key", "msgid", "message_id", "string_id", "id"} | extra
+    return _TRANSLATION_KWARGS_BUILTIN | extra
 
 
 def _extra_translation_calls() -> Set[str]:
@@ -2160,6 +2349,119 @@ def _excluded_dirs() -> Set[str]:
     extra = ({str(v).strip() for v in raw if str(v).strip()}
              if isinstance(raw, list) else set())
     return PYTHON_EXCLUDES_BUILTIN | extra
+
+
+def _source_text_mode() -> bool:
+    """True when the project's translation key IS the source-language sentence (``t("Save the file")``).
+
+    Two worlds that need different questions. With identifiers as keys
+    (``t('nav.home')``) a sentence sitting in the code is suspect, and a
+    catalogue key no call mentions is dead. With the sentence as the key,
+    the text inside ``t()`` is the translated thing, a catalogue entry is
+    alive wherever its text is written (a registry of labels that are
+    translated when they are shown), and the translations can quote one
+    another's labels. Declared in ``key_style`` rather than guessed: a
+    guess that went the wrong way would flip every finding at once.
+    """
+    raw = str(_project_config().get("key_style") or "").strip().lower()
+    return raw in ("source_text", "source-text", "sourcetext")
+
+
+#: A label quoted inside a sentence: 'Name', «Name» or "Name".
+_RX_QUOTED = re.compile(r"'([^'\n]{3,80})'|«([^»\n]{3,80})»|\"([^\"\n]{3,80})\"")
+
+
+def _data_text_rules() -> List[dict]:
+    """The ``data_texts`` rules of the project file, validated.
+
+    Each rule names data files (a glob from the project root) and which JSON
+    values in them are prose. Anything malformed is skipped, not fatal: a
+    typo in a configuration file must not take the whole run down.
+    """
+    raw = _project_config().get("data_texts")
+    rules: List[dict] = []
+    for item in raw if isinstance(raw, list) else []:
+        if (isinstance(item, dict) and isinstance(item.get("glob"), str)
+                and isinstance(item.get("paths"), list)):
+            try:
+                minimum = int(item.get("min_length", 3))
+            except (TypeError, ValueError):
+                minimum = 3
+            catalogue = item.get("catalogue")
+            require = item.get("require")
+            rules.append({"glob": item["glob"], "min_length": minimum,
+                          "paths": [str(p) for p in item["paths"] if str(p).strip()],
+                          # a glob relative to each data file's folder: translations that travel with the data
+                          "catalogue": catalogue.strip() if isinstance(catalogue, str) and catalogue.strip() else "",
+                          # catalogue names (without .json) that must exist and be complete
+                          "require": [str(r).strip() for r in require if str(r).strip()] if isinstance(require, list) else []})
+    return rules
+
+
+def _data_catalogue_dirs() -> Set[Path]:
+    """Folders of catalogues that belong to a DATA FILE, not to the project.
+
+    A ``data_texts`` rule with ``catalogue: "lang/*.json"`` says that next to every
+    matching file there is a ``lang/`` folder of per-language dictionaries. Those look
+    exactly like the project's own locale folder - a directory of ``en.json``,
+    ``es.json`` - so locale discovery would load them as the project's dictionaries
+    and let the last one found replace the real ``en``. They are set aside here, and
+    only the rule reads them.
+    """
+    found: Set[Path] = set()
+    for rule in _data_text_rules():
+        if not rule["catalogue"]:
+            continue
+        for data_file in PROJECT_ROOT.glob(rule["glob"]):
+            for catalogue in data_file.parent.glob(rule["catalogue"]):
+                found.add(catalogue.parent.resolve())
+    return found
+
+
+def _path_regex(pattern: str):
+    """Regex for a JSON path pattern: ``*`` is one level, ``**`` any number of levels.
+
+    ``items.*.note`` matches ``items.2.note``; ``**.note`` matches a ``note``
+    at any depth. A list index counts as a level of its own, written as its
+    number.
+
+    A last segment ending in ``#key`` addresses the NAME of an object member
+    instead of its value: ``report.checks.*#key`` is every check name in
+    ``{"report": {"checks": {"window visible": "ok"}}}`` (the value is
+    ``report.checks.*``). Prose is sometimes the key.
+    """
+    tokens = pattern.split(".")
+    out = ""
+    for i, token in enumerate(tokens):
+        last = i == len(tokens) - 1
+        suffix = ""
+        if last and token.endswith("#key") and token != "#key":
+            token, suffix = token[:-4], "#key"
+        if token == "**":
+            out += (".+" if last else r"(?:[^.]+\.)*") + re.escape(suffix)
+        elif token == "*":
+            out += "[^.]+" + re.escape(suffix) + ("" if last else r"\.")
+        else:
+            out += re.escape(token) + re.escape(suffix) + ("" if last else r"\.")
+    return re.compile("^" + out + "$")
+
+
+def _walk_strings(node, path: str = ""):
+    """Every string leaf of a parsed JSON document with its dotted path.
+
+    Object member NAMES are yielded too, as ``<path>.<name>#key``, so a rule
+    can ask for them (see _path_regex); a rule that does not ask never sees them.
+    """
+    if isinstance(node, str):
+        yield path, node
+    elif isinstance(node, dict):
+        for key, value in node.items():
+            here = f"{path}.{key}" if path else str(key)
+            yield f"{here}#key", str(key)
+            yield from _walk_strings(value, here)
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from _walk_strings(value, f"{path}.{index}" if path else str(index))
 
 
 def _ui_funcs() -> Set[str]:
@@ -2614,6 +2916,9 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
         self.ui_context_strings: Set[Tuple[int, int, str]] = set()  # UI widget context
         self.func_arg_strings: Set[Tuple[int, int, str]] = set()    # unknown function arg context
         self.raise_positions: Set[Tuple[int, int]] = set()          # inside a raise
+        self.fragment_positions: Set[Tuple[int, int]] = set()       # a static piece of an f-string
+        self.glue_quote_positions: Set[Tuple[int, int]] = set()     # ... of one that is not a sentence as a whole
+        self.cli_help_positions: Set[Tuple[int, int]] = set()       # help text of a command-line parser
         self.used_translation_keys: Set[str] = set()
         # Literal first-args of t()-family CALLS only — unlike
         # used_translation_keys this never mixes in dotted literals found
@@ -2719,6 +3024,16 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
 
         is_method = isinstance(node.func, ast.Attribute)
 
+        # ── Command-line help: text for a terminal, not for the interface ──
+        # Positions only, like a raise: the strings are still collected and the
+        # caller counts what it holds back (see _exempt).
+        if func_name in ("add_argument", "add_parser", "add_argument_group", "add_subparsers", "ArgumentParser"):
+            for kw in node.keywords:
+                if kw.arg in ("help", "description", "epilog", "usage", "title"):
+                    for child in ast.walk(kw.value):
+                        if isinstance(child, ast.Constant) and isinstance(child.value, str):
+                            self.cli_help_positions.add(self._pos(child, node.lineno))
+
         # ── UI-context string collection ──
         if func_name in _ui_funcs():
             for arg in node.args:
@@ -2746,12 +3061,33 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
 
         self.generic_visit(node)
 
+    def _note_fragments(self, node, fallback_line: int):
+        """Remember where the static pieces of an f-string are, and whether the f-string is a sentence as a whole.
+
+        The pieces of ``f'Profile "{name}" was saved'`` each have ONE double quote, as do those of
+        ``f'install "{path}"'``; only the whole tells them apart. So the open-quote rule may apply to
+        a piece only when the f-string, taken whole, has at most one word and no sentence punctuation
+        (``?``, ``!``, ``.``, ``:``, an ellipsis): ``install "{path}"`` qualifies, ``Profile "{name}"
+        was saved`` and ``Delete "{file}"?`` do not.
+        """
+        parts = [v for v in node.values if isinstance(v, ast.Constant) and isinstance(v.value, str)]
+        joined = " ".join(v.value for v in parts)
+        stripped = _RX_ENTITY.sub(" ", _RX_MARKUP_TAG.sub(" ", joined))
+        words = [w for w in re.findall(r"[^\W\d_]{3,}", stripped) if w.lower() not in _UNIT_WORDS]
+        sentence = len(words) >= 2 or bool(re.search(r"[?!.:\u2026]", joined))
+        for v in parts:
+            position = self._pos(v, fallback_line)
+            self.fragment_positions.add(position)
+            if not sentence:
+                self.glue_quote_positions.add(position)
+
     def _collect_ui_strings(self, node, fallback_line: int):
         """Extract string values from an AST node in a UI context."""
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             self.ui_context_strings.add((*self._pos(node, fallback_line), node.value))
         elif isinstance(node, ast.JoinedStr):
             # Extract static fragments from f-strings in UI context
+            self._note_fragments(node, fallback_line)
             for val in node.values:
                 if isinstance(val, ast.Constant) and isinstance(val.value, str):
                     raw = val.value
@@ -2819,6 +3155,7 @@ class PythonCodeAnalyzer(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_JoinedStr(self, node):
+        self._note_fragments(node, node.lineno)
         for val in node.values:
             if isinstance(val, ast.Constant) and isinstance(val.value, str):
                 self.hardcoded_strings.add((*self._pos(val, node.lineno), val.value))
@@ -3108,7 +3445,17 @@ class UniversalQualityAnalyzer:
             'missing_keys': [], 'empty_values': [], 'mismatched_vars': [],
             'orphan_keys': set(), 'unresolved_code_keys': [], 'icu_plurals': [],
             'member_missing': [], 'member_fallback_only': [],
+            'quoted_source': [], 'data_texts': [],
         }
+        # source_text mode: every string literal written in the code, and every
+        # prose string in the declared data files. A catalogue key that appears
+        # in either is in use even though no t() call names it.
+        self.all_source_literals: Set[str] = set()
+        self.all_data_strings: Set[str] = set()
+        # (kind, file, line, text) of every string source_text mode held back, so
+        # the report can LIST the assumption it rests on instead of only counting it
+        self.held_back_examples: List[tuple] = []
+        self._glue_seen: Set[tuple] = set()
         self.all_known_keys: Set[str] = set()
         self.all_used_code_keys: Set[str] = set()
         self.all_t_call_keys: Set[str] = set()
@@ -3128,6 +3475,7 @@ class UniversalQualityAnalyzer:
         print(L("start"))
         print("=" * 80)
 
+        _ensure_config_template()
         self._auto_load()
         if not self.flat_locales:
             print(L("no_locales"))
@@ -3137,6 +3485,13 @@ class UniversalQualityAnalyzer:
         print(L("fmt_detected", fmt=self.detected_format))
         print(L("langs_found", langs=langs))
         print(L("total_keys", n=len(self.all_known_keys)))
+        if _source_text_mode():
+            print(L("key_style_note"))
+        elif self.all_known_keys:
+            sentences = sum(1 for k in self.all_known_keys
+                            if " " in k.strip() and not PythonCodeAnalyzer._KEY_PATTERN.match(k))
+            if sentences / len(self.all_known_keys) >= 0.6:
+                print(L("hint_source_text", pct=round(100 * sentences / len(self.all_known_keys))))
 
         self.test_python_code()
         self.test_missing_keys_global()
@@ -3144,6 +3499,8 @@ class UniversalQualityAnalyzer:
         self.test_member_access_keys()
         self.test_empty_values_and_placeholders()
         self.test_mixed_languages()
+        self.test_data_texts()
+        self.test_quoted_labels()
         self.test_orphan_keys()
         self.test_json_real_duplicates()
         self.test_icu_plural_rules()
@@ -3164,6 +3521,11 @@ class UniversalQualityAnalyzer:
     def _auto_load(self):
         """Auto-discover and load i18n data from any supported format."""
         per_lang_dirs, single_files = _discover_locale_sources(PROJECT_ROOT)
+        # a data file's own catalogues are not the project's dictionaries (see _data_catalogue_dirs)
+        data_dirs = _data_catalogue_dirs()
+        if data_dirs:
+            per_lang_dirs = [d for d in per_lang_dirs if d.resolve() not in data_dirs]
+            single_files = [f for f in single_files if f.resolve().parent not in data_dirs]
 
         # Priority: per-lang directory files first
         if per_lang_dirs:
@@ -3573,13 +3935,42 @@ class UniversalQualityAnalyzer:
                     self.all_used_code_keys.update(ana.used_translation_keys)
                     self.all_t_call_keys.update(ana.t_call_keys)
                     self.all_dynamic_prefixes.update(ana.dynamic_key_prefixes)
+                    if _source_text_mode():
+                        self.all_source_literals.update(text_ for _l, _c, text_ in ana.hardcoded_strings)
 
                     # Tier 1: UI-context strings — args to known UI widget functions
+                    def _glue(lineno_, col_, text_, direct=False) -> bool:
+                        # Text that is not text: the static pieces of an f-string that
+                        # carry no wording (units, tags) or are the open half of a quoted
+                        # value in something that is not a sentence, and shell command
+                        # lines. Counted by kind once each, never dropped in silence, and
+                        # switchable in "exempt" like every other suppression.
+                        # *direct* = handed straight to a widget: there only a piece with
+                        # no wording at all is glue. A one-word label with a quoted value
+                        # (Save "x") or one that mentions a command (Type /help) is
+                        # interface text, and reading it as glue would hide it.
+                        flags_ = _exempt_flags()
+                        position = (lineno_, col_)
+                        if (flags_["markup_fragments"] and position in ana.fragment_positions
+                                and (not _has_words(text_)
+                                     or (not direct and position in ana.glue_quote_positions
+                                         and _unbalanced_quote(text_)))):
+                            kind = "markup_fragments"
+                        elif flags_["commands"] and not direct and _looks_like_command(text_):
+                            kind = "commands"
+                        else:
+                            return False
+                        marker = (str(rel), lineno_, col_, text_)
+                        if marker not in self._glue_seen:
+                            self._glue_seen.add(marker)
+                            self.exempt_counts[kind] = self.exempt_counts.get(kind, 0) + 1
+                        return True
+
                     seen = set()
                     for lineno, col, text in ana.ui_context_strings:
                         if _suppressed(lineno):
                             continue
-                        if self._is_ui_context_string(text):
+                        if self._is_ui_context_string(text) and not _glue(lineno, col, text, direct=True):
                             key = (str(rel), lineno, text)
                             if key not in seen:
                                 seen.add(key)
@@ -3599,6 +3990,8 @@ class UniversalQualityAnalyzer:
                     def _exempt(lineno, col, text) -> bool:
                         if _flags["raise_arguments"] and (lineno, col) in ana.raise_positions:
                             kind = "raise_arguments"
+                        elif _flags["cli_help"] and (lineno, col) in ana.cli_help_positions:
+                            kind = "cli_help"
                         elif _flags["regex_patterns"] and _looks_like_regex(text):
                             kind = "regex_patterns"
                         elif _flags["user_agents"] and _looks_like_user_agent(text):
@@ -3608,13 +4001,34 @@ class UniversalQualityAnalyzer:
                         self.exempt_counts[kind] = self.exempt_counts.get(kind, 0) + 1
                         return True
 
+                    def _held_back(text_, line_) -> bool:
+                        # source_text mode: the sentence IS the key. One inside a
+                        # translation call is the thing being translated, and one
+                        # the catalogue holds as a key is translated where it is
+                        # shown (a registry of labels, a table). Both are counted
+                        # and named in the report, never silently dropped. A sentence
+                        # handed RAW to a widget is not here: that is Tier 1.
+                        if not _source_text_mode():
+                            return False
+                        if text_ in ana.t_call_keys:
+                            kind = "translated_call"
+                        elif text_ in self.all_known_keys:
+                            kind = "catalogued"
+                        else:
+                            return False
+                        if not _flags.get(kind, True):
+                            return False
+                        self.exempt_counts[kind] = self.exempt_counts.get(kind, 0) + 1
+                        self.held_back_examples.append((kind, str(rel), line_, text_))
+                        return True
+
                     # Tier 2: Function-arg strings — ALL-CAPS labels passed to unknown functions
                     for lineno, col, text in ana.func_arg_strings:
                         if _suppressed(lineno):
                             continue
                         key = (str(rel), lineno, text)
                         if key not in seen and self._is_func_arg_label(text):
-                            if _exempt(lineno, col, text):
+                            if _glue(lineno, col, text) or _held_back(text, lineno) or _exempt(lineno, col, text):
                                 continue
                             seen.add(key)
                             self.results['hardcoded'].append({
@@ -3629,7 +4043,7 @@ class UniversalQualityAnalyzer:
                             continue
                         key = (str(rel), lineno, text)
                         if key not in seen and self._is_ui_string(text):
-                            if _exempt(lineno, col, text):
+                            if _glue(lineno, col, text) or _held_back(text, lineno) or _exempt(lineno, col, text):
                                 continue
                             seen.add(key)
                             self.results['hardcoded'].append({
@@ -3863,11 +4277,16 @@ class UniversalQualityAnalyzer:
         also collects dotted literals from data structures (module paths
         like 'core.library') and would drown this check in false alarms."""
         print("\n" + L("an_unresolved"))
-        unresolved = sorted(
-            k for k in self.all_t_call_keys
-            if PythonCodeAnalyzer._KEY_PATTERN.match(k)
-            and k not in self.all_known_keys
-        )
+        if _source_text_mode():
+            # the sentence is the key: any literal passed to t() the catalogue lacks
+            unresolved = sorted(k for k in self.all_t_call_keys
+                                if k.strip() and k not in self.all_known_keys)
+        else:
+            unresolved = sorted(
+                k for k in self.all_t_call_keys
+                if PythonCodeAnalyzer._KEY_PATTERN.match(k)
+                and k not in self.all_known_keys
+            )
         self.results['unresolved_code_keys'] = unresolved
         if unresolved:
             print(L("unresolved_bad", n=len(unresolved)))
@@ -3974,11 +4393,19 @@ class UniversalQualityAnalyzer:
         Deliberately NON-fatal (matching the long-standing project stance:
         keys are never auto-stripped; the report is the deliverable)."""
         print("\n" + L("an_orphans"))
-        if not self.all_used_code_keys and not self.all_dynamic_prefixes:
+        source_text = _source_text_mode()
+        # source_text mode: a catalogue entry is in use wherever its TEXT is
+        # written - a call, a registry of labels, a prose field in a data file.
+        # Sentences have no hierarchy, so no "dynamic family" logic either.
+        written = (self.all_source_literals | self.all_data_strings) if source_text else set()
+        if (not self.all_used_code_keys and not self.all_dynamic_prefixes and not written):
             return
         high, low = set(), set()
         for key in self.all_known_keys:
-            if key in self.all_used_code_keys:
+            if key in self.all_used_code_keys or key in written:
+                continue
+            if source_text:
+                high.add(key)
                 continue
             if any(key.startswith(p) for p in self.all_dynamic_prefixes):
                 continue
@@ -4000,6 +4427,138 @@ class UniversalQualityAnalyzer:
             print(L("orphan_low", n=len(low)))
         if not high and not low:
             print(L("orphan_none"))
+
+    def test_data_texts(self):
+        """Prose kept in DATA files, which no scan of the code can see.
+
+        A note, a description or a caption can live in a data file (a preset,
+        a content pack) as a plain string. The code only passes it through, so
+        it is never a literal, never inside ``t()``, and every other check in
+        this file reports a clean project while the translated interface shows
+        it in the source language. The project declares which JSON values are
+        prose (``data_texts``).
+
+        Where the translations live is the rule's choice. By default each text
+        must be a key of the project's catalogue. With ``catalogue`` (a glob
+        relative to each data file's folder, such as ``lang/*.json``) the texts
+        are checked in the catalogues that sit NEXT TO the file - one per
+        language - so data that is shared on its own carries its translations
+        with it and nothing has to be added to the project's. ``require`` names
+        the languages whose catalogue must exist and be complete.
+
+        Also what keeps catalogue entries from being called orphans: the text
+        is used, just not by code.
+        """
+        print("\n" + L("an_data"))
+        rules = _data_text_rules()
+        if not rules:
+            print(L("data_off"))
+            return
+        checked = 0
+        for rule in rules:
+            patterns = [_path_regex(p) for p in rule["paths"]]
+            for fpath in sorted(PROJECT_ROOT.glob(rule["glob"])):
+                if not fpath.is_file():
+                    continue
+                try:
+                    data = json.loads(fpath.read_text(encoding="utf-8-sig"))
+                except Exception:                               # noqa: BLE001
+                    continue
+                rel = str(fpath.relative_to(PROJECT_ROOT))
+                found = []
+                for path, value in _walk_strings(data):
+                    if len(value.strip()) < rule["min_length"]:
+                        continue
+                    if any(p.match(path) for p in patterns):
+                        found.append((path, value))
+                        self.all_data_strings.add(value)
+                checked += len(found)
+
+                if not rule["catalogue"]:
+                    for path, value in found:
+                        if value not in self.all_known_keys:
+                            self.results['data_texts'].append({'file': rel, 'path': path, 'text': value})
+                    continue
+
+                catalogues = {}
+                for cat in sorted(fpath.parent.glob(rule["catalogue"])):
+                    try:
+                        table = json.loads(cat.read_text(encoding="utf-8-sig"))
+                    except Exception:                           # noqa: BLE001
+                        table = None
+                    if isinstance(table, dict):
+                        catalogues[cat.stem] = table
+                for language in rule["require"]:
+                    if language not in catalogues:
+                        self.results['data_texts'].append({
+                            'file': rel, 'path': rule["catalogue"], 'language': language,
+                            'text': f"({language}: no catalogue file)"})
+                for language, table in catalogues.items():
+                    for path, value in found:
+                        translated = table.get(value)
+                        if not (isinstance(translated, str) and translated.strip()):
+                            self.results['data_texts'].append({
+                                'file': rel, 'path': path, 'text': value, 'language': language})
+        bad = self.results['data_texts']
+        if bad:
+            print(L("data_bad", n=len(bad)))
+            for row in bad[:20]:
+                lang = f"[{row['language']}] " if row.get('language') else ""
+                print(f"      - {row['file']} · {row['path']}: {lang}{row['text'][:70]}")
+            self.failures.append(L(
+                "fail_data", n=len(bad),
+                items=", ".join(row['text'][:40] for row in bad[:5])))
+        else:
+            print(L("data_ok", n=checked))
+
+    def test_quoted_labels(self):
+        """A translation that names a label of the SOURCE language.
+
+        With the sentence as the key, a help text can mention another
+        control by name: "Tick 'Live control' to play". The translator
+        translates the sentence and leaves the quoted name as it was, so the
+        Spanish reads "Marque 'Live control' para jugar" while the button
+        says "Control en vivo". Nothing else catches it: the key exists, the
+        value is not empty, the placeholders agree, and the sentence as a
+        whole is mostly in the right language.
+
+        A quoted fragment is a leaked label when it is itself a key of the
+        catalogue and this language translates that key into something
+        different. A name that translates to itself (a brand, a unit) is
+        fine, and so is any quoted word that is not a key at all.
+        """
+        print("\n" + L("an_quoted"))
+        if not _source_text_mode():
+            print(L("quoted_off"))
+            return
+        seen = set()
+        for lang, flat in sorted(self.flat_locales.items()):
+            for key, text in flat.items():
+                for match in _RX_QUOTED.finditer(str(text)):
+                    fragment = next(g for g in match.groups() if g).strip()
+                    for candidate in {fragment, fragment[:1].upper() + fragment[1:],
+                                      fragment[:1].lower() + fragment[1:]}:
+                        translated = flat.get(candidate, "").strip()
+                        if (candidate in flat and translated
+                                and candidate.lower() == fragment.lower()
+                                and translated.lower() != fragment.lower()):
+                            marker = (lang, key, fragment)
+                            if marker not in seen:
+                                seen.add(marker)
+                                self.results['quoted_source'].append({
+                                    'lang': lang, 'key': key[:80],
+                                    'fragment': fragment, 'expected': translated})
+                            break
+        bad = self.results['quoted_source']
+        if bad:
+            print(L("quoted_bad", n=len(bad)))
+            for row in bad[:20]:
+                print(f"      - {row['lang']}: «{row['fragment']}» -> «{row['expected']}»  ({row['key'][:50]})")
+            self.failures.append(L(
+                "fail_quoted", n=len(bad),
+                items=", ".join(f"{r['lang']}:{r['fragment']}" for r in bad[:5])))
+        else:
+            print(L("quoted_ok"))
 
     def test_json_real_duplicates(self):
         """Find true duplicate keys at the same JSON object level."""
@@ -4174,6 +4733,8 @@ class UniversalQualityAnalyzer:
                  L("sev_low")),
                 (L("cat_empty"), self.results['empty_values'], L("sev_high")),
                 (L("cat_missing"), self.results['missing_keys'], L("sev_high")),
+                (L("cat_quoted"), self.results['quoted_source'], L("sev_high")),
+                (L("cat_data"), self.results['data_texts'], L("sev_high")),
                 (L("cat_hardcoded") + " — high",
                  [i for i in self.results['hardcoded']
                   if (i.get('severity') or _severity_for(i.get('context', ''))) == 'high'],
@@ -4208,6 +4769,34 @@ class UniversalQualityAnalyzer:
                 f.write(L("r_unresolved_h"))
                 for k in self.results['unresolved_code_keys']:
                     f.write(f"- [ ] `{k}`\n")
+                f.write("\n")
+
+            catalogued = [e for e in self.held_back_examples if e[0] == "catalogued"]
+            if catalogued:
+                f.write(L("r_catalogued_h", n=len(catalogued)))
+                by_file = defaultdict(list)
+                for _kind, fpath_, line_, text_ in catalogued:
+                    by_file[fpath_].append((line_, text_))
+                for fpath_, rows_ in sorted(by_file.items()):
+                    rp_ = f"../{fpath_.replace(chr(92), '/')}"
+                    for line_, text_ in sorted(rows_):
+                        shown_ = text_.replace('`', "'").replace('\n', '\\n')
+                        f.write(f"- [{fpath_}:{line_}]({rp_}#L{line_}): `{shown_[:110]}`\n")
+                f.write("\n</details>\n\n")
+
+            if self.results['quoted_source']:
+                f.write(L("r_quoted_h"))
+                for it in self.results['quoted_source']:
+                    f.write(L("r_quoted_line", lang=it['lang'], frag=it['fragment'],
+                              expected=it['expected'], key=it['key'].replace('`', "'")))
+                f.write("\n")
+
+            if self.results['data_texts']:
+                f.write(L("r_data_h"))
+                for it in self.results['data_texts']:
+                    lang = f"[{it['language']}] " if it.get('language') else ""
+                    f.write(L("r_data_line", file=it['file'], path=it['path'],
+                              text=(lang + it['text']).replace('`', "'").replace('\n', '\\n')[:200]))
                 f.write("\n")
 
             if (self.results['member_missing']
@@ -5022,6 +5611,201 @@ _SELF_TEST_CASES_EXTRACT = [
 ]
 
 
+# The sentence AS the key (gettext style): t("Save the file"). Everything the
+# symbolic-key scenario treats as normal behaves differently here, so it gets
+# a project of its own: English source text, a Spanish catalogue.
+_SELF_TEST_FILES_SRC = {
+    "locales/es.json": """{
+  "Save the file": "Guardar el archivo",
+  "Tick 'Live control' to play": "Marque 'Live control' para jugar",
+  "Live control": "Control en vivo",
+  "Use 'Acme Pro' here": "Use 'Acme Pro' aquí",
+  "Acme Pro": "Acme Pro",
+  "A registry label": "Una etiqueta del registro",
+  "Sentence written only in the data": "Frase escrita solo en los datos",
+  "covered measure": "medida cubierta",
+  "covered outcome": "resultado cubierto",
+  "A truly dead key": "Una clave realmente muerta"
+}""",
+    ".i18n-quality.json": """{
+  "key_style": "source_text",
+  "ui_functions": ["HouseLabel"],
+  "data_texts": [
+    {"glob": "data/*.json", "paths": ["title", "items.*.note", "measures.*", "measures.*#key"]},
+    {"glob": "presets/*/preset.json", "paths": ["title", "items.*.note"], "catalogue": "lang/*.json", "require": ["es"]}
+  ]
+}""",
+    "src_app.py": '''
+def build(ui):
+    ui.setText(t("Save the file"))                        # the sentence is the key: translated
+    ui.setText("This raw text is not translated")         # raw in a widget: still a finding
+    ui.setText(t("Tick 'Live control' to play"))
+    ui.setText(t("Use 'Acme Pro' here"))
+    ui.setText(t("This sentence is missing from the catalogue"))   # a key the catalogue lacks
+    note = "A loose sentence written in the code"
+
+SPEC = dict(label="A registry label")                     # a registry: translated where it is shown
+''',
+    # Presets that travel on their own: each has its OWN catalogues, and the project's is not consulted for them
+    "presets/complete/preset.json": """{"title": "Complete title", "items": [{"note": "Complete note"}]}""",
+    "presets/complete/lang/es.json": """{"Complete title": "Titulo completo", "Complete note": "Nota completa"}""",
+    "presets/partial/preset.json": """{"title": "Partial title", "items": [{"note": "Untranslated note"}]}""",
+    "presets/partial/lang/es.json": """{"Partial title": "Titulo parcial", "Untranslated note": "  "}""",
+    "presets/bare/preset.json": """{"title": "Bare title", "items": []}""",
+    "data/preset.json": """{
+  "id": "stable-id",
+  "title": "Sentence written only in the data",
+  "items": [{"note": "Uncovered sentence in the data"}, {"note": "ok"}],
+  "measures": {"covered measure": "covered outcome", "uncovered measure": "covered outcome"},
+  "entries": [{"name": "stable-id"}]
+}""",
+}
+
+_SELF_TEST_CASES_SRC = [
+    ("src_call_key_not_hardcoded",
+     "a sentence inside t() is the key, not a hardcoded text",
+     lambda a: not any(i['text'] == "Save the file" for i in a.results['hardcoded'])),
+    ("src_raw_widget_still_flagged",
+     "but the same kind of sentence handed raw to a widget still is one",
+     lambda a: any(i['text'] == "This raw text is not translated" and i['severity'] == 'high'
+                   for i in a.results['hardcoded'])),
+    ("src_loose_sentence_flagged",
+     "and a loose untranslated sentence in the code is reported",
+     lambda a: any(i['text'] == "A loose sentence written in the code"
+                   and i['context'] == 'general' for i in a.results['hardcoded'])),
+    ("src_catalogue_literal_held_back",
+     "a literal the catalogue holds (a registry label) is counted, not reported",
+     lambda a: not any(i['text'] == "A registry label" for i in a.results['hardcoded'])
+     and a.exempt_counts.get('catalogued', 0) >= 1),
+    ("src_call_keys_counted",
+     "the sentences already inside t() are counted as held back too, never silently",
+     lambda a: a.exempt_counts.get('translated_call', 0) >= 1),
+    ("src_unresolved_sentence",
+     "a sentence passed to t() that the catalogue lacks blocks",
+     lambda a: "This sentence is missing from the catalogue" in a.results['unresolved_code_keys']),
+    ("src_orphan_by_literal",
+     "a catalogue entry whose text is written in the code is not an orphan",
+     lambda a: "A registry label" not in a.results['orphan_keys']),
+    ("src_orphan_by_data",
+     "nor one whose text is written in a data file",
+     lambda a: "Sentence written only in the data" not in a.results['orphan_keys']),
+    ("src_orphan_real",
+     "while an entry written nowhere is",
+     lambda a: "A truly dead key" in a.results['orphan_keys']),
+    ("src_quoted_label_leak",
+     "a translation quoting a source label it left untranslated is found",
+     lambda a: any(r['fragment'] == "Live control" and r['expected'] == "Control en vivo"
+                   for r in a.results['quoted_source'])),
+    ("src_quoted_brand_ok",
+     "a quoted name that translates to itself is not",
+     lambda a: not any(r['fragment'] == "Acme Pro" for r in a.results['quoted_source'])),
+    ("src_data_text_uncovered",
+     "prose in a data file with no catalogue entry blocks",
+     lambda a: sorted(r['text'] for r in a.results['data_texts'] if r['file'].startswith("data"))
+     == ["Uncovered sentence in the data", "uncovered measure"]),
+    ("src_catalogue_next_to_data",
+     "a rule can name a catalogue that sits next to each data file: complete ones pass without touching the project's",
+     lambda a: not any(r['file'].startswith("presets") and r['file'].split(chr(92))[-2:-1] == ["complete"]
+                       or "complete" in r['file'] for r in a.results['data_texts'])),
+    ("src_catalogue_incomplete",
+     "an empty or missing entry in that catalogue is found, with its language",
+     lambda a: any("partial" in r['file'] and r['text'] == "Untranslated note" and r.get('language') == "es"
+                   for r in a.results['data_texts'])),
+    ("src_catalogue_required",
+     "and a language the rule requires but the folder lacks is a finding too",
+     lambda a: any("bare" in r['file'] and r.get('language') == "es" and "no catalogue file" in r['text']
+                   for r in a.results['data_texts'])),
+    ("src_data_member_names",
+     "prose can be the NAME of an object member (\"#key\"): a covered one passes, an uncovered one is found",
+     lambda a: any(r['text'] == "uncovered measure" and r['path'].endswith("#key")
+                   for r in a.results['data_texts'])
+     and not any(r['text'] == "covered measure" for r in a.results['data_texts'])),
+    ("src_data_identifiers_untouched",
+     "while identifiers and short tokens in the same file are not asked for",
+     lambda a: not any(r['text'] in ("stable-id", "ok") for r in a.results['data_texts'])),
+    ("src_blocks_the_run",
+     "and these findings are blocking, so a build fails on them",
+     lambda a: sum(1 for m in a.failures
+                   if "missing from the catalogue" in m or "ncovered" in m or "Live control" in m) >= 3),
+]
+
+# The default behaviour must not move for projects that never opt in.
+_SELF_TEST_CASES.append(
+    ("src_off_by_default",
+     "without key_style nothing of the source-text checks runs",
+     lambda a: a.results['quoted_source'] == [] and a.results['data_texts'] == []
+     and 'catalogued' not in a.exempt_counts and 'translated_call' not in a.exempt_counts))
+
+
+# Text that is not text: the glue of an f-string around its values, shell command lines, and
+# the help of a command-line parser. None of it is interface, and none of it should send a
+# person looking for something to translate - while the real sentences next to it still do.
+_SELF_TEST_FILES_GLUE = {
+    "locales/en.json": """{"app": {"title": "Settings"}}""",
+    "locales/it.json": """{"app": {"title": "Impostazioni"}}""",
+    "glue.py": '''
+import argparse
+
+
+def build(ui, w, h, name, uri):
+    ui.setText(f"{w}x{h} px<br>")                                   # units and a tag around values
+    ui.setText(f'<b>{name}</b><br><img src="{uri}">')               # nothing but markup around values
+    ui.setText(f"{w} x {h} px  @ {name}")                           # coordinates
+    ui.setText(f"Window size is {w}x{h} pixels wide")               # a real sentence with values
+    ui.setText("Please choose a profile before continuing")         # a real plain sentence
+    run(f'install "{name}" {h}')                                    # pieces of a command line
+    steps = [f"pnputil /delete-driver {name} /uninstall /force"]    # a shell command
+    note = "Run with --verbose to see more detail"                  # prose that merely mentions a flag
+    ui.setText(f'Profile "{name}" was saved')                        # a quoted value INSIDE a sentence
+    ui.setText(f'Delete "{name}"?')                                  # one word, quotes and a question mark
+    ui.setText(f'Save "{name}"')                                     # one word and a quoted value, straight into a widget
+    ui.setText("Type /help")                                         # a short label that mentions a command
+
+
+def cli():
+    parser = argparse.ArgumentParser(description="Launch the helper with the chosen options")
+    parser.add_argument("--profile", help="The profile to load when the helper starts")
+    return parser
+''',
+}
+
+_SELF_TEST_CASES_GLUE = [
+    ("glue_markup_not_reported",
+     "an f-string's units and tags around values are not hardcoded text",
+     lambda a: not any(("px" in i['text'] and "<br>" in i['text']) or "<img src" in i['text'] or i['text'].strip() in ("x", "px  @")
+                       for i in a.results['hardcoded'])),
+    ("glue_open_quote_not_reported",
+     "nor the first half of a string a value will close (install \")",
+     lambda a: not any(i['text'].startswith('install "') for i in a.results['hardcoded'])),
+    ("glue_command_not_reported",
+     "nor the pieces of a shell command line",
+     lambda a: not any("pnputil" in i['text'] or "/uninstall" in i['text'] for i in a.results['hardcoded'])),
+    ("glue_counted_and_named",
+     "and they are counted by kind, never dropped in silence",
+     lambda a: a.exempt_counts.get('markup_fragments', 0) >= 3 and a.exempt_counts.get('commands', 0) >= 1),
+    ("glue_real_sentences_still_found",
+     "while real sentences around them are still reported: with values, plain, or mentioning a flag",
+     lambda a: any("Window size is" in i['text'] for i in a.results['hardcoded'])
+     and any(i['text'] == "Please choose a profile before continuing" for i in a.results['hardcoded'])
+     and any("Run with --verbose" in i['text'] for i in a.results['hardcoded'])),
+    ("glue_quoted_value_in_a_sentence",
+     "a quoted value inside a sentence is still reported, however many quotes the pieces have",
+     lambda a: any(i['text'].startswith('Profile "') and i['severity'] == 'high' for i in a.results['hardcoded'])
+     and any(i['text'].startswith('" was saved') or 'was saved' in i['text'] for i in a.results['hardcoded'])),
+    ("glue_question_with_quote",
+     "and so is a one-word sentence with a quoted value and a question mark",
+     lambda a: any(i['text'].startswith('Delete "') and i['severity'] == 'high' for i in a.results['hardcoded'])),
+    ("glue_widget_text_never_command_or_quote",
+     "text handed straight to a widget is never held back as a command or an open quote",
+     lambda a: any(i['text'] == "Type /help" and i['severity'] == 'high' for i in a.results['hardcoded'])
+     and any(i['text'].startswith('Save "') and i['severity'] == 'high' for i in a.results['hardcoded'])),
+    ("glue_cli_help_held_back",
+     "command-line help is not interface text: counted as held back, not reported",
+     lambda a: not any("profile to load when" in i['text'] or "Launch the helper" in i['text'] for i in a.results['hardcoded'])
+     and a.exempt_counts.get('cli_help', 0) == 2),
+]
+
+
 def _analyse_fixture(files: dict):
     """Write *files* to a temp project, analyse it, return the analyzer."""
     import codecs
@@ -5100,6 +5884,8 @@ def _run_self_test() -> int:
     scenarios = [
         ("json + python", _SELF_TEST_FILES, _SELF_TEST_CASES),
         ("js module", _SELF_TEST_FILES_JS, _SELF_TEST_CASES_JS),
+        ("source text as key", _SELF_TEST_FILES_SRC, _SELF_TEST_CASES_SRC),
+        ("layout glue, commands, cli help", _SELF_TEST_FILES_GLUE, _SELF_TEST_CASES_GLUE),
     ]
     print(chr(10) + "=" * 80)
     print(L("st_header"))
@@ -5142,6 +5928,46 @@ def _run_self_test() -> int:
          "the JS scenario analyses identically under both backends",
          lambda _a: js_shots[0] == js_shots[1]),
     ], failed)
+
+    # The configuration the tool writes for itself must change nothing: the
+    # same project analysed with no file and with the freshly generated one has
+    # to give identical findings. "An empty file changes nothing" is a promise
+    # the template makes in its own comment; this is what keeps it true when
+    # an option is added with a default that does not match what the code does.
+    def _snapshot(a) -> dict:
+        return {
+            "hardcoded": sorted((i['file'], i['line'], i.get('col'), i['text'], i['severity'])
+                                for i in a.results['hardcoded']),
+            "held back": dict(sorted(a.exempt_counts.items())),
+            "orphans": sorted(a.results['orphan_keys']),
+            "unresolved": sorted(a.results['unresolved_code_keys']),
+            "mixed": len(a.results['mixed_langs']),
+            "blocking": len(a.failures),
+        }
+
+    template_json = json.dumps(_config_template(), ensure_ascii=False, indent=2)
+    print('  -- default configuration')
+    for scenario, files in (("layout glue", _SELF_TEST_FILES_GLUE), ("js module", _SELF_TEST_FILES_JS),
+                            ("icu", _SELF_TEST_FILES_ICU), ("extraction", _SELF_TEST_FILES_EXTRACT)):
+        total += 1
+        bare = _snapshot(_analyse_fixture(files))
+        written = _snapshot(_analyse_fixture({**files, ".i18n-quality.json": template_json}))
+        same = bare == written
+        print(f"  [{'OK  ' if same else 'FAIL'}] default_config_{scenario.split()[0]:10} "
+              f"the generated configuration changes nothing on the '{scenario}' project")
+        if not same:
+            failed.append("default_config_" + scenario.split()[0])
+            for key in bare:
+                if bare[key] != written[key]:
+                    print(f"         {key}: without {str(bare[key])[:140]} | with {str(written[key])[:140]}")
+    total += 1
+    template_keys = {k for k in _config_template() if not k.startswith("_")}
+    read_keys = set(re.findall(r'_project_config\(\)\.get\("(\w+)"', Path(__file__).read_text(encoding="utf-8")))
+    undocumented = sorted(read_keys - template_keys)
+    print(f"  [{'OK  ' if not undocumented else 'FAIL'}] default_config_complete   "
+          f"every option the tool reads is in the generated file{'' if not undocumented else ': ' + ', '.join(undocumented)}")
+    if undocumented:
+        failed.append("default_config_complete")
 
     global _FORCE_BUILTIN_PLURALS
     for forced in (False, True):
@@ -5192,8 +6018,8 @@ if __name__ == '__main__':
     if _args.vocab_help:
         print(
               PROJECT_VOCAB_FILE + " — optional, in the scanned project root (or --root). Written\n"
-              "for you the first time it is missing, with every value empty: it\n"
-              "changes nothing until you fill something in, and deleting it is fine.\n"
+              "for you the first time it is missing, with the values the analyzer already\n"
+              "uses: it changes nothing until you edit it, and deleting it is fine.\n"
               "\n"
               "Everything project-specific lives here, so the analyzer itself stays\n"
               "project-agnostic:\n"
