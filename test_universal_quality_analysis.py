@@ -1248,8 +1248,56 @@ def _ts_is_call_argument(node) -> bool:
     return False
 
 
+#: Initializers that look like a LOOKUP into a catalogue (`translations[lang]`,
+#: `ctx.t`, `strings.it`, an alias): a variable assigned from one of these IS
+#: the catalogue. Anything else (a call, a literal, an object) is a plain value.
+_TS_CATALOGUE_LIKE_INIT = frozenset(('member_expression', 'subscript_expression', 'identifier'))
+
+
+def _ts_declares_local(scope, name: str, before: int) -> bool:
+    """True when the block *scope* declares *name* with ``const/let/var`` ahead
+    of byte *before*, as something that is NOT a catalogue lookup.
+
+        const t = parse(theirs);          <- a local value: ``t.ok`` is no translation
+        const t = translations[language]; <- the catalogue itself: keep checking
+        const { t } = ctx;                <- destructured: the catalogue (not matched)
+
+    Before this, only a bare PARAMETER shadowed the name. A function that
+    happened to call a local variable `t` made every property it read
+    (``t.ok``, ``t.value``...) a blocking "undefined on screen" finding, with
+    no way out short of renaming the variable. The initializer is what tells
+    the two apart, the same way the binding's shape does for parameters.
+    """
+    for stmt in scope.children:
+        if stmt.start_byte >= before:
+            break
+        if stmt.type not in ('lexical_declaration', 'variable_declaration'):
+            continue
+        for decl in stmt.children:
+            if decl.type != 'variable_declarator':
+                continue
+            ident = decl.child_by_field_name('name')
+            if ident is None or ident.type != 'identifier':
+                continue
+            if ident.text.decode('utf-8', 'replace') != name:
+                continue
+            value = decl.child_by_field_name('value')
+            if value is None:
+                return True                      # `let t;` — a plain local
+            while value.type == 'parenthesized_expression' and value.named_children:
+                value = value.named_children[0]
+            if value.type in _TS_CATALOGUE_LIKE_INIT:
+                continue                         # an alias of the catalogue
+            return True
+    return False
+
+
 def _ts_is_shadowed(node, name: str) -> bool:
     """True when *name* at *node* is bound as a PLAIN parameter nearby.
+
+    Also true for a local ``const t = <call/literal/object>`` (see
+    _ts_declares_local); an alias of the catalogue (``const t = translations[l]``)
+    is not shadowing.
 
     Deliberately NOT read as "this is not the catalogue". Both of these bind
     ``t`` as a plain parameter and only one is a loop variable:
@@ -1268,6 +1316,8 @@ def _ts_is_shadowed(node, name: str) -> bool:
     while cur is not None and depth < 200:
         depth += 1
         if cur.type in _TS_FUNC_TYPES and _ts_binds_name(cur, name):
+            return True
+        if cur.type in ('statement_block', 'program') and _ts_declares_local(cur, name, node.start_byte):
             return True
         if cur.type in ('catch_clause', 'for_in_statement'):
             param = cur.child_by_field_name('parameter') or cur.child_by_field_name('left')
@@ -1388,6 +1438,108 @@ def _extract_member_keys_regex(src: str, names: Set[str]):
                 continue
             out.append((key, lineno, bool(m.group(2)), ambiguous))
     return out
+
+
+# ── Catalogue read with a COMPUTED index: `t[...]` ───────────────────────────
+# ``t.key`` is a literal property; ``t[`status_${s}`]``, ``t["key"]`` and
+# ``t[cond ? "a" : "b"]`` are the same lookup written another way, and they are
+# how families of keys are normally reached. Only the first form was seen, so
+# every key reached through an index was reported as an unreferenced orphan —
+# the tool called live keys dead. Treated like the call forms: a literal is a
+# use, a template/concatenation is a dynamic PREFIX that keeps its whole family
+# alive, a conditional contributes both branches. A bare variable index
+# (``t[k]``) says nothing and adds nothing, as with ``t(k)``.
+
+def _ts_index_strings(node, keys: Set[str], prefixes: Set[str]) -> None:
+    """Keys/prefixes named by the INDEX expression of a ``t[...]`` read."""
+    if node is None:
+        return
+    kind = node.type
+    text = node.text.decode('utf-8', 'replace')
+    if kind == 'string':
+        literal = text[1:-1]
+        if _MEMBER_KEY_PATTERN.match(literal):
+            keys.add(literal)
+    elif kind == 'template_string':
+        raw = text[1:-1]
+        if '${' in raw:
+            head = raw.split('${', 1)[0]
+            if head:
+                prefixes.add(head)
+        elif _MEMBER_KEY_PATTERN.match(raw):
+            keys.add(raw)
+    elif kind == 'ternary_expression':
+        _ts_index_strings(node.child_by_field_name('consequence'), keys, prefixes)
+        _ts_index_strings(node.child_by_field_name('alternative'), keys, prefixes)
+    elif kind == 'parenthesized_expression':
+        for child in node.named_children:
+            _ts_index_strings(child, keys, prefixes)
+    elif kind == 'binary_expression':
+        op = node.child_by_field_name('operator')
+        if op is not None and op.text.decode('utf-8', 'replace') == '+':
+            left = node.child_by_field_name('left')
+            if left is not None and left.type == 'string':
+                head = left.text.decode('utf-8', 'replace')[1:-1]
+                if head:
+                    prefixes.add(head)
+
+
+def _extract_member_subscripts_ast(src: str, ext: str, names: Set[str]):
+    """``(keys, prefixes)`` read as ``t[...]``, from the parse tree, or None."""
+    if _FORCE_REGEX_EXTRACTION:
+        return None
+    lang = _TS_LANG_BY_EXT.get(ext)
+    parser = _ts_parser(lang) if lang else None
+    if parser is None:
+        return None
+    try:
+        tree = parser.parse(src.encode('utf-8', 'replace'))
+        if tree is None or tree.root_node is None:
+            return None
+    except Exception:
+        logger.debug("tree-sitter could not read a %s file", ext, exc_info=True)
+        return None
+    keys: Set[str] = set()
+    prefixes: Set[str] = set()
+    stack = [tree.root_node]
+    seen = 0
+    while stack:
+        node = stack.pop()
+        seen += 1
+        if seen > 400_000:
+            break
+        stack.extend(node.children)
+        if node.type != 'subscript_expression':
+            continue
+        obj = node.child_by_field_name('object')
+        if obj is None or obj.type != 'identifier':
+            continue
+        if obj.text.decode('utf-8', 'replace') not in names:
+            continue
+        _ts_index_strings(node.child_by_field_name('index'), keys, prefixes)
+    return keys, prefixes
+
+
+def _extract_member_subscripts_regex(src: str, names: Set[str]):
+    """``(keys, prefixes)`` for ``t[...]`` without a tree: the three plain shapes."""
+    alt = "|".join(re.escape(n) for n in sorted(names))
+    src = _blank_comments(src)
+    keys = {m.group(2) for m in re.finditer(
+        r"\b(?:" + alt + r")\[\s*([\"'])([A-Za-z][A-Za-z0-9_]*)\1\s*\]", src)}
+    prefixes = {m.group(1) for m in re.finditer(
+        r"\b(?:" + alt + r")\[\s*`([^`$]+)\$\{", src)}
+    return keys, prefixes
+
+
+def _extract_member_subscripts(src: str, ext: str):
+    """``(keys, prefixes)`` the catalogue objects are indexed with."""
+    names = _member_access_objects()
+    if not names:
+        return set(), set()
+    result = _extract_member_subscripts_ast(src, ext, names)
+    if result is not None:
+        return result
+    return _extract_member_subscripts_regex(src, names)
 
 
 def _extract_member_keys(src: str, ext: str):
@@ -3890,6 +4042,12 @@ class UniversalQualityAnalyzer:
                                 {'key': _mk, 'file': _rel, 'line': _mline,
                                  'fallback': _mfb, 'ambiguous': _mamb,
                                  'preview': _preview(_src.splitlines(), _mline)})
+                        # Stesso catalogo letto con indice calcolato: t["k"],
+                        # t[`prefisso_${x}`], t[c ? "a" : "b"]. Sono USI (la
+                        # famiglia dinamica resta viva), mai prove di chiave mancante.
+                        _sk, _sp = _extract_member_subscripts(_src, ext)
+                        self.all_used_code_keys.update(_sk)
+                        self.all_dynamic_prefixes.update(_sp)
                         _other_lines = _src.splitlines()
                         # The tree when it can answer, the regex when it
                         # cannot. Which one answered is recorded per file,
@@ -5806,6 +5964,74 @@ _SELF_TEST_CASES_GLUE = [
 ]
 
 
+# ── Scenario: catalogue read as an object (t.key / t[...]) ──────────────────
+# Two limits found on a real project, each planted here so they stay fixed:
+#  - a LOCAL variable called like the catalogue (`const t = parse(x)`) was read
+#    as the catalogue, and `t.ok` became a blocking "undefined" finding;
+#  - keys reached through a computed index (`t[`status_${s}`]`, `t["extra"]`,
+#    `t[c ? "aa" : "bb"]`) were reported as unreferenced orphans.
+_SELF_TEST_FILES_MEMBER = {
+    ".i18n-quality.json": '{"member_access_objects": ["t"]}',
+    "src/i18n/translations.js": """
+export const translations = {
+  it: {
+    save: "Salva", status_open: "Aperto", status_closed: "Chiuso",
+    extra: "Extra", aa: "Primo", bb: "Secondo", reallyOrphan: "Mai usata",
+  },
+  en: {
+    save: "Save", status_open: "Open", status_closed: "Closed",
+    extra: "Extra", aa: "First", bb: "Second", reallyOrphan: "Never used",
+  },
+};
+""",
+    "src/Screen.jsx": """
+import { translations } from "./i18n/translations";
+
+export function Screen({ language, status, flag }) {
+  const t = translations[language];
+  return (
+    <div>
+      <b>{t.save}</b>
+      <i>{t[`status_${status}`]}</i>
+      <u>{t["extra"]}</u>
+      <s>{t[flag ? "aa" : "bb"]}</s>
+      <p>{t.notInCatalogue}</p>
+    </div>
+  );
+}
+""",
+    "src/merge.js": """
+export function merge(theirs, mine) {
+  const t = parse(theirs);
+  if (!mine.ok || !t.ok) return mine;
+  return t.value;
+}
+""",
+}
+
+_SELF_TEST_CASES_MEMBER = [
+    ("member_local_not_catalogue",
+     "a local `const t = parse(x)` is not the catalogue: `t.ok` is not an undefined key",
+     lambda a: not any(r['key'] == 'ok' for r in a.results.get('member_missing', []))),
+    ("member_alias_still_checked",
+     "an alias of the catalogue (`const t = translations[language]`) is still checked",
+     lambda a: any(r['key'] == 'notInCatalogue' for r in a.results.get('member_missing', []))),
+    ("member_template_index_is_use",
+     "keys reached through t[`status_${s}`] are not orphans",
+     lambda a: 'status_open' not in a.results['orphan_keys']
+     and 'status_closed' not in a.results['orphan_keys']),
+    ("member_literal_index_is_use",
+     "t[\"extra\"] counts as a use of `extra`",
+     lambda a: 'extra' not in a.results['orphan_keys']),
+    ("member_ternary_index_is_use",
+     "t[c ? \"aa\" : \"bb\"] counts both branches",
+     lambda a: 'aa' not in a.results['orphan_keys'] and 'bb' not in a.results['orphan_keys']),
+    ("member_real_orphan_kept",
+     "a key nothing reaches is still reported as an orphan",
+     lambda a: 'reallyOrphan' in a.results['orphan_keys']),
+]
+
+
 def _analyse_fixture(files: dict):
     """Write *files* to a temp project, analyse it, return the analyzer."""
     import codecs
@@ -5886,6 +6112,7 @@ def _run_self_test() -> int:
         ("js module", _SELF_TEST_FILES_JS, _SELF_TEST_CASES_JS),
         ("source text as key", _SELF_TEST_FILES_SRC, _SELF_TEST_CASES_SRC),
         ("layout glue, commands, cli help", _SELF_TEST_FILES_GLUE, _SELF_TEST_CASES_GLUE),
+        ("catalogue as object, t.key / t[...]", _SELF_TEST_FILES_MEMBER, _SELF_TEST_CASES_MEMBER),
     ]
     print(chr(10) + "=" * 80)
     print(L("st_header"))
