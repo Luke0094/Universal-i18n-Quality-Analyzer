@@ -132,6 +132,10 @@ per-tier filtering to keep the noise down.
   what the call *returns*
 - template-literal prefixes — `` t(`nav.${page}`) `` keeps the `nav.*`
   family alive for the orphan analysis
+- catalogue read as an object — `t.save`, `t["save"]`, `` t[`status_${s}`] ``,
+  `t[open ? "a" : "b"]`, for projects that declare `t` in
+  `member_access_objects` (see below). A literal is a use, a template or
+  `"prefix" + x` keeps its family alive, a conditional counts both branches
 - hardcoded UI text, from the parse tree — see below
 
 That covers the cross-language checks (**unresolved keys** and
@@ -369,6 +373,7 @@ totals it compares against are global.
   "exempt":       { "raise_arguments": false },
   "translation_kwargs":      ["msg_key"],
   "extra_translation_calls": ["houseT", "useHouseTranslations"],
+  "member_access_objects":   ["t"],
   "budgets":      { "high": 0 }
 }
 ```
@@ -407,6 +412,20 @@ totals it compares against are global.
   names, and factories whose *result* takes the key
   (`useTranslations()('nav.home')`). Both shapes are tried for every name,
   because declaring which one it is would be one more thing to get wrong.
+- **`member_access_objects`** — identifiers whose *property access* is a
+  catalogue read, for a project that hands the catalogue around as an object
+  (`t.save`) instead of calling it (`t('save')`). Calls cannot see that
+  style: the key is never a string literal. A key missing from every language
+  is reported by what happens on screen — `t.qty || "Qty"` still renders
+  something (informative), a bare `t.qty` renders the string `undefined`
+  (blocking). The same identifier is also a common name for a loop variable
+  or a local value, and those are not catalogue reads: a plain parameter
+  (`items.filter(t => t.x)`) and a local declaration whose initializer is not a
+  lookup (`const t = parse(x)`) shadow the name and are never reported as
+  missing keys, while an alias of the catalogue (`const t = translations[lang]`)
+  and a destructured prop (`({ t }) => …`) are still checked. Shadowing is
+  resolved on the parse tree; the regex fallback only sees a binding written
+  on the same line as the read.
 - **`budgets`** — see above.
 - **`key_style`** — `"keys"` (the default) or `"source_text"`. With identifiers
   as keys (`t('nav.home')`) a sentence sitting in the code is suspect and a
@@ -475,7 +494,7 @@ and asserts each one:
   [OK  ] function_not_ignored   a string argument to a FUNCTION named get() still is
   [OK  ] vocab_loaded           the project's own tech_words reach the neutral vocabulary
   …
-🟢 Self-test passed (176 cases).
+🟢 Self-test passed (182 cases).
 ```
 
 Three scenarios run, not one: a JSON/Python project, a JavaScript one
@@ -485,6 +504,13 @@ the JS scenario exists because a real project reported *"no i18n
 dictionaries found"* while its `src/i18n/translations.js` sat right there,
 and the ICU scenario exists because this codebase contains no ICU at all,
 so without a fixture the entire plural engine would ship unexercised.
+
+A scenario for the catalogue read as an object plants the two limits a real
+project ran into: a local `const t = parse(x)` read as the catalogue (its
+`t.ok` became a blocking "undefined on screen"), and keys reached through
+`` t[`status_${s}`] `` or `t["key"]` reported as orphans. Its negative cases
+matter as much: an alias of the catalogue is still checked, and a key nothing
+reaches is still an orphan.
 
 A fourth scenario covers extraction precision: `t()` written inside a
 string and inside a mid-line comment, next to genuine keys in Vue, PHP,
